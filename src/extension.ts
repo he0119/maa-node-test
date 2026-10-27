@@ -121,7 +121,9 @@ function startRun(target: TestTarget, options: {caseIndex?: number; dryRun?: boo
 async function resolveTestTarget(uriArgument: unknown): Promise<TestTarget | null> {
     const workspace = resolveNodeTestWorkspace();
     if (!workspace) {
-        await vscode.window.showWarningMessage("没有打开任何文件夹：先把 MaaEnd 仓库作为工作区打开，再运行节点测试。");
+        await vscode.window.showWarningMessage(
+            "没有打开任何文件夹：先把放了 maatools.config.mts 的仓库作为工作区打开，再运行节点测试。",
+        );
         return null;
     }
 

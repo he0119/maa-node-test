@@ -168,6 +168,17 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 - **结果标记**：文件节点用 `**短标题**` + Markdown 列表（明细来自 `RESULT-CASE`）；有逐用例信息时子用例各按自己的结论标记，没被点名的按通过处理；一条逐用例信息都没有时，子用例跟随文件结论。
 - **单条用例运行**：各自一次进程，退出码即结论，失败文案同样优先用 `RESULT-CASE` 给的原因。
 
+## 换一个仓库来用要改什么
+
+插件的机制是通用的（`maa-tools` 的节点测试），默认值是 MaaEnd 的。换到别的仓库一般只改设置：
+
+| 设置 | MaaEnd 的值 | 换仓库时 |
+| --- | --- | --- |
+| `maaNodeTest.configPath` | `maatools.config.mts` | `maa-tools` 的默认约定，通常不用改 |
+| `maaNodeTest.testsetDir` | `tests/MaaEndTestset` | 指到那个仓库的测试集目录 |
+
+如果那个仓库的 `tests/scripts/loader.mts` 用了别的组名拼法（不是 `(controller-resource)name`）或者 `imageRoot` 不是 `controller/resource`，`runner/lib/filter.mjs` 的收窄条件要跟着改 —— 这是本项目唯一「贴着 MaaEnd 写」的地方。
+
 ## 设置项
 
 | 设置 | 默认 | 用途 |

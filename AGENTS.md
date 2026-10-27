@@ -1,8 +1,10 @@
 # AGENTS.md
 
-这是一个 VS Code 扩展：在 VS Code 里跑 **Maa 节点测试**（MaaEnd 仓库 `tests/**/test_*.json`），并在悬浮提示里预览各平台截图。
+这是一个 VS Code 扩展，服务于 **Maa 节点测试**：基于 `maa-tools` 的节点测试机制（`tests/**/test_*.json` 与测试集截图），适用于任何采用该机制的仓库。默认值（`maatools.config.mts`、`tests/MaaEndTestset`）取自 MaaEnd，均为设置项，可调整。
 
-**边界先说清楚**：只做「验证某张截图上哪些节点应该命中」这一件事。不做 Pipeline 校验、不做截图工具、不做任务调试、不碰识别算法本身。想加这类功能之前先确认它真的属于节点测试。
+**范围**：只使用节点测试的输入 —— 测试文件、测试集截图、`maatools.config.mts`。范围内包括运行用例、查看截图、报告失败原因、辅助编写用例；范围外是 Pipeline 链路校验、资源打包、任务运行调试、识别算法实现，这些由各仓库自己的工具负责。
+
+写代码时注意别把 MaaEnd 特有的东西焊死：默认值可以来自它，但路径、控制器名、资源服名都要能从设置或扫描得到（`AGENTS.md` 硬约束里有「不要写死平台名」这条）。
 
 面向使用者的说明在 [README.md](README.md)；改代码前读 [.agents/skills/maa-node-test-dev/SKILL.md](.agents/skills/maa-node-test-dev/SKILL.md)，设计取舍看 [.agents/notes/](.agents/notes/README.md)。
 

@@ -114,7 +114,7 @@ export class NodeTestExplorer implements vscode.Disposable {
 
         const workspaceRoot = resolveNodeTestWorkspace()?.workspaceRoot;
         if (!workspaceRoot) {
-            // 没打开 MaaEnd 仓库时测试面板就是空的，不报错也不打扰
+            // 没打开被测仓库时测试面板就是空的，不报错也不打扰
             return;
         }
 
@@ -249,7 +249,7 @@ export class NodeTestExplorer implements vscode.Disposable {
             const workspace = resolveNodeTestWorkspace();
             if (!workspace) {
                 await vscode.window.showWarningMessage(
-                    "没有打开工作区文件夹：先把 MaaEnd 仓库作为工作区打开，再运行节点测试。",
+                    "没有打开工作区文件夹：先把放了 maatools.config.mts 的仓库作为工作区打开，再运行节点测试。",
                 );
                 return;
             }

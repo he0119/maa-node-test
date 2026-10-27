@@ -22,7 +22,7 @@ export class NodeTestHoverProvider implements vscode.HoverProvider {
         if (!workspace) {
             // 没开文件夹时找不到测试集，明说一句，别让用户以为插件坏了
             const hint = new vscode.MarkdownString(
-                "没有打开工作区文件夹，找不到测试集截图。先把 MaaEnd 仓库作为工作区打开。",
+                "没有打开工作区文件夹，找不到测试集截图。先把放了 maatools.config.mts 的仓库作为工作区打开。",
                 true,
             );
             return new vscode.Hover(hint, imageValueRange(document, field));

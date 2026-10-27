@@ -1,23 +1,27 @@
-# Maa 节点测试
+# Maa 节点测试插件
 
-在 VS Code 里跑 MaaEnd 的节点测试：点一下就只跑你想验证的那条用例，鼠标放在 `image` 上就能看见各平台的截图。只做这一件事。
+Maa 节点测试的 VS Code 插件，基于 `maa-tools` 的节点测试机制（`tests/**/test_*.json` 与测试集截图），适用于任何采用该机制的仓库。默认值取自 MaaEnd（作者日常使用的仓库），均可在设置中调整。
 
-## 有什么用
+## 功能
 
-- **只跑一条**：改完一个识别节点，不用为验证它等一次全量 `pnpm test`。
-- **失败直接说原因**：哪个平台失败、哪个节点没命中、还是识别框不对，直接写在测试面板里。
-- **各平台截图对比**：鼠标一放就能看见 Win32 / ADB / CloudADB 上的同名截图，缺哪张一眼就知道。
-- **测试面板全都在**：左侧烧瓶图标里是「目录 → 测试文件 → 用例」，点目录、点文件、点单条都能跑。
+- **运行单条用例**：修改识别节点后无需执行全量 `pnpm test` 即可验证目标用例。
+- **报告失败原因**：失败的平台、未命中的节点、识别框偏差，均写入测试面板。
+- **对照各平台截图**：悬浮提示展示 Win32 / ADB / CloudADB 下的同名截图，缺失的平台单独标注。
+- **测试面板集成**：以「目录 → 测试文件 → 用例」三层组织，目录、文件、单条用例均可运行。
+
+## 范围
+
+插件范围限于节点测试，输入为测试文件（`tests/**/test_*.json`）、测试集截图与 `maatools.config.mts`。Pipeline 链路校验、资源打包、任务运行调试不在其中，由各仓库自己的工具负责。
 
 ## 装之前
 
 | 需要 | 说明 |
 | --- | --- |
 | Node 22 或更高 | `maa-tools` 和仓库脚本都依赖 Node 22 的 API；不在 PATH 里可以设 `maaNodeTest.nodePath` |
-| pnpm，以及一个装好依赖的 MaaEnd 仓库 | 工作区根要有 `maatools.config.mts`，并且跑过 `pnpm install` |
+| pnpm，以及一个装好依赖的仓库（用 `maa-tools` 做节点测试的，比如 MaaEnd） | 工作区根要有 `maatools.config.mts`，并且跑过 `pnpm install` |
 | VS Code 1.85 或更高 | |
 
-插件不改 MaaEnd 仓库，也不往仓库里加文件。
+插件不改动被测仓库，也不往里加文件。
 
 ## 装
 
@@ -40,7 +44,7 @@ pnpm install
 pnpm run compile
 ```
 
-关键点：**运行插件的那个窗口，工作区必须是 MaaEnd 仓库**。插件要靠它读 `maatools.config.mts`、`tests/` 和截图；工作区不对，测试面板就是空的。下面三种方式都行：
+关键点：**运行插件的那个窗口，工作区必须是被测的那个仓库**。插件要靠它读 `maatools.config.mts`、`tests/` 和截图；工作区不对，测试面板就是空的。下面三种方式都行，示例里用的是作者本机的 `~/dev/MaaEnd`，换成你自己的仓库路径即可。
 
 ### 方式一（推荐）：用多根工作区文件
 
@@ -143,7 +147,7 @@ pnpm run compile
 ## 常见问题
 
 **测试面板是空的。**
-当前窗口的工作区不是 MaaEnd 仓库，或者仓库里没有 `tests/**/test_*.json`。按上面的方式一重新打开。
+当前窗口的工作区不是被测仓库，或者仓库里没有 `tests/**/test_*.json`。按上面的方式一重新打开。
 
 **点运行，提示「没跑起来」。**
 大多是 node 版本低于 22，用 `maaNodeTest.nodePath` 指到 22+ 的 node。也可能是第一次运行要联网下载 MaaFW 失败，看「Maa 节点测试」输出面板里的 prepare 日志。
@@ -167,11 +171,17 @@ pnpm run compile
 3. **逐用例原因依赖 maa-tools 的错误明细**：它写 `tests/maatools/error_details.json`，插件只在本次运行确实更新过这个文件时才采信；拿不到就退化成「整个文件失败，原因未知」。
 4. **悬浮图片按原尺寸渲染**：图大时悬浮框会很高。
 
-## 和 MaaEnd 仓库的关系
+## 和具体仓库的关系
 
-这个扩展是 MaaEnd 节点测试的配套开发工具，但**不放在 MaaEnd 仓库里**：仓库 CI 只为 Pipeline / 资源 / Agent 服务，加一个需要 `tsc` 构建的 VS Code 扩展会平白多一套构建产物和依赖。
+插件是独立的（自己一个仓库、自己一套构建），**不塞进被测仓库**：那边 CI 只为 Pipeline / 资源 / Agent 服务，加一个需要 `tsc` 构建的 VS Code 扩展会平白多一套构建产物和依赖。
 
-插件对 MaaEnd 仓库的假设只有三条：工作区根有 `maatools.config.mts`、截图在 `tests/MaaEndTestset` 下按 `<控制器>/<资源服>` 分目录、测试文件叫 `tests/**/test_*.json`。
+它对被测仓库的假设只有三条：
+
+1. 工作区根有 `maatools.config.mts`（`maa-tools` 的默认约定）；
+2. 测试文件叫 `tests/**/test_*.json`（同上）；
+3. 截图按 `<控制器>/<资源服>/<图片>` 分目录放在测试集里。默认路径是 `tests/MaaEndTestset`（MaaEnd 的写法），别的仓库用 `maaNodeTest.testsetDir` 指过去。
+
+默认值来自 MaaEnd 纯粹是因为作者日常在测它。换一个仓库来用，一般只需要改 `maaNodeTest.testsetDir` 和 `maaNodeTest.configPath`；如果那个仓库的 `tests/scripts/loader.mts` 用了不一样的组名拼法，插件靠「组名 + 用例键」把用例从全量结果里挑出来这一步也要跟着调（见 [reference.md](.agents/skills/maa-node-test-dev/reference.md#过滤规则)）。
 
 ## 想改这个插件
 

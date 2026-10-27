@@ -1,7 +1,7 @@
 {
     "name": "maa-node-test",
-    "displayName": "Maa 节点测试",
-    "description": "在 VS Code 里运行 Maa 节点测试用例（单个用例 / 整个文件 / 测试面板），并在悬浮提示里预览各平台截图",
+    "displayName": "Maa 节点测试插件",
+    "description": "Maa 节点测试的 VS Code 插件：跑 maa-tools 的节点测试用例，在测试面板里看结果与失败原因，悬浮预览各平台截图",
     "publisher": "MaaEnd",
     "version": "0.1.0",
     "private": true,
