@@ -367,7 +367,7 @@ code --install-extension dist/maa-node-test-0.1.0.vsix
 
 | secret | 用途 | 不给会怎样 |
 | --- | --- | --- |
-| `VS_MARKETPLACE_TOKEN` | 发布到 Visual Studio Marketplace 的 PAT（要带 Marketplace 的 Manage 权限，且账号能访问 `MaaEnd` 这个 publisher） | 发布那一步直接失败 |
+| `VS_MARKETPLACE_TOKEN` | 发布到 Visual Studio Marketplace 的 PAT（要带 Marketplace 的 Manage 权限，且账号能访问 `he0119` 这个 publisher） | 发布那一步直接失败 |
 | `OPEN_VSX_TOKEN` | 发布到 Open VSX（VSCodium 用户） | 那一步自动跳过 |
 
 ### 发版步骤
