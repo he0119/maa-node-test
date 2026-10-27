@@ -18,6 +18,8 @@ import {
     verdictFromExitCode,
 } from "./core/testResult";
 import type {CaseOutcome, CaseVerdict, FileVerdict} from "./core/testResult";
+import {buildRunSummary} from "./core/runSummary";
+import type {SummaryCase, SummaryFile} from "./core/runSummary";
 import {buildFileNode, folderSegments} from "./core/testExplorer";
 import {describeCommand, startTestProcess} from "./runner";
 import type {RunRequest} from "./runner";
@@ -59,6 +61,13 @@ interface LeafInfo {
 interface RunTarget extends LeafInfo {
     /** 测试面板上要标记结果的节点：整文件跑时是文件节点，单用例跑时是用例节点 */
     item: vscode.TestItem;
+}
+
+/** 文件节点下的子用例 + runner 是否给了它逐用例结论（标记和结果块共用同一份） */
+interface TargetCase {
+    item: vscode.TestItem;
+    info?: CaseVerdict;
+    caseIndex?: number;
 }
 
 /** 扫描到的测试文件，解析结果在建树时复用，避免重复读盘 */
@@ -419,6 +428,7 @@ export class NodeTestExplorer implements vscode.Disposable {
             testFileRelativePaths: relativePaths.length > 1 ? relativePaths : undefined,
         };
         testRun.appendOutput(`${describeCommand(runRequest, this.extensionPath)}\r\n`, undefined, anchor);
+        testRun.appendOutput(toOutputChunk(`${RAW_LOG_BANNER}\n`), undefined, anchor);
 
         const startedAt = Date.now();
         const verdicts = new Map<string, FileVerdict>();
@@ -447,26 +457,29 @@ export class NodeTestExplorer implements vscode.Disposable {
 
         if (outcome.cancelled) {
             for (const item of reportedItems) testRun.skipped(item);
+            appendRunSummary(testRun, anchor, {files: [], durationMs: duration, cancelled: true});
             return;
         }
 
+        const summaryFiles: SummaryFile[] = [];
         for (const target of targets) {
             const verdict = verdicts.get(target.relativePath) ?? fallbackVerdict(outcome.code);
-            this.markFileTarget(testRun, target, verdict, duration, caseVerdicts);
+            const cases = this.casesOfTarget(target, caseVerdicts);
+            summaryFiles.push({
+                relativePath: target.relativePath,
+                verdict,
+                caseCount: cases.length,
+                cases: problemCases(cases),
+            });
+            this.markFileTarget(testRun, target, verdict, duration, cases);
         }
+
+        appendRunSummary(testRun, anchor, {files: summaryFiles, durationMs: duration});
     }
 
-    /**
-     * 按文件结论标记。子用例优先用 runner 给的逐用例结论（带具体原因），没有就跟随文件结论。
-     */
-    private markFileTarget(
-        testRun: vscode.TestRun,
-        target: RunTarget,
-        verdict: FileVerdict,
-        duration: number,
-        caseVerdicts: ReadonlyMap<string, CaseVerdict>,
-    ): void {
-        const cases = [...target.item.children].map(
+    /** 文件节点下的子用例 → 用例下标 + runner 给的结论；标记和结果块共用这一份 */
+    private casesOfTarget(target: RunTarget, caseVerdicts: ReadonlyMap<string, CaseVerdict>): TargetCase[] {
+        return [...target.item.children].map(
             ([
                 id,
                 item,
@@ -479,7 +492,18 @@ export class NodeTestExplorer implements vscode.Disposable {
                 return {item, info, caseIndex: leaf?.caseIndex};
             },
         );
+    }
 
+    /**
+     * 按文件结论标记。子用例优先用 runner 给的逐用例结论（带具体原因），没有就跟随文件结论。
+     */
+    private markFileTarget(
+        testRun: vscode.TestRun,
+        target: RunTarget,
+        verdict: FileVerdict,
+        duration: number,
+        cases: readonly TargetCase[],
+    ): void {
         // 标记规则在 core 里（纯函数，可单测）：文件通过不代表每条用例都验证过
         const marking = planFileMarking(
             target.relativePath,
@@ -519,6 +543,7 @@ export class NodeTestExplorer implements vscode.Disposable {
             caseIndex: target.caseIndex,
         };
         testRun.appendOutput(`${describeCommand(runRequest, this.extensionPath)}\r\n`, undefined, target.item);
+        testRun.appendOutput(toOutputChunk(`${RAW_LOG_BANNER}\n`), undefined, target.item);
 
         const startedAt = Date.now();
         const caseVerdicts = new Map<string, CaseVerdict>();
@@ -541,21 +566,37 @@ export class NodeTestExplorer implements vscode.Disposable {
 
         if (outcome.cancelled) {
             testRun.skipped(target.item);
+            appendRunSummary(testRun, target.item, {files: [], durationMs: duration, cancelled: true});
             return;
         }
 
         const verdict = verdictFromExitCode(outcome.code);
+        const known = caseVerdicts.get(caseKeyOf(target.relativePath, target.caseIndex ?? 0));
         if (verdict === "pass") {
             testRun.passed(target.item, duration);
-            return;
+        } else {
+            // 单条用例跑时 runner 也会给逐用例结论，原因比通用话术有用得多
+            const fallback = describeVerdict(verdict, title);
+            const message = buildTestMessage(known?.title ?? fallback.title, known?.detail ?? fallback.detail);
+            if (verdict === "fail") testRun.failed(target.item, message, duration);
+            else testRun.errored(target.item, message, duration);
         }
 
-        // 单条用例跑时 runner 也会给逐用例结论，原因比通用话术有用得多
-        const known = caseVerdicts.get(caseKeyOf(target.relativePath, target.caseIndex ?? 0));
-        const fallback = describeVerdict(verdict, title);
-        const message = buildTestMessage(known?.title ?? fallback.title, known?.detail ?? fallback.detail);
-        if (verdict === "fail") testRun.failed(target.item, message, duration);
-        else testRun.errored(target.item, message, duration);
+        // 单条用例也补一块结果：形状和整文件跑一致，用户不用记两套读法
+        appendRunSummary(testRun, target.item, {
+            files: [
+                {
+                    relativePath: target.relativePath,
+                    verdict,
+                    caseCount: 1,
+                    cases:
+                        known && known.verdict !== "pass"
+                            ? [{caseIndex: target.caseIndex, verdict: known.verdict, title: known.title}]
+                            : [],
+                },
+            ],
+            durationMs: duration,
+        });
     }
 }
 
@@ -614,7 +655,8 @@ export function collectTargets(
  * 按结论把节点标成通过 / 失败 / 跳过。
  *
  * `skipped` 给「缺图没验证到」的用例用：这类情况不该把整次运行染红，标成灰色的跳过更贴近事实，
- * 具体原因在探测阶段就写进节点描述了。文件通过时若带明细（哪几条跳过了），也一并挂在通过消息上。
+ * 具体原因在探测阶段就写进节点描述了。「哪几条因缺图跳过」由运行末尾的结果块统一列出，
+ * 这里不再往每个通过节点上各追加一遍 —— 那会把测试输出刷成流水账。
  */
 function applyMark(
     testRun: vscode.TestRun,
@@ -628,22 +670,37 @@ function applyMark(
         return;
     }
     if (verdict === "pass") {
-        // VS Code 的 TestRun.passed 不接受消息，所以「哪几条因缺图跳过」写进测试输出
+        // VS Code 的 TestRun.passed 不接受消息；带明细的通过（缺图跳过）靠结果块说清楚
         testRun.passed(item, duration);
-        if (text.detail.length > 0) {
-            const lines = [
-                text.title,
-                ...text.detail,
-            ]
-                .map((line) => `· ${line}`)
-                .join("\n");
-            testRun.appendOutput(toOutputChunk(`${lines}\n`), undefined, item);
-        }
         return;
     }
     const message = buildTestMessage(text.title, text.detail);
     if (verdict === "fail") testRun.failed(item, message, duration);
     else testRun.errored(item, message, duration);
+}
+
+/** 原始日志前面的一条分隔：末尾才是结果块，中间这一大段是排错用的原始输出 */
+const RAW_LOG_BANNER = "──── 原始日志（maa-tools 的输出，排错看这里） ────";
+
+/** 文件节点下的子用例里，有问题的那几条才进结果块；通过的只计入数字 */
+function problemCases(cases: readonly TargetCase[]): SummaryCase[] {
+    const collected: SummaryCase[] = [];
+    for (const entry of cases) {
+        const info = entry.info;
+        if (!info || info.verdict === "pass") continue;
+        collected.push({caseIndex: entry.caseIndex, verdict: info.verdict, title: info.title});
+    }
+    return collected;
+}
+
+/** 在测试输出末尾补一块「结果」：结论一行、计数、耗时，然后只列有问题的地方 */
+function appendRunSummary(
+    testRun: vscode.TestRun,
+    anchor: vscode.TestItem,
+    input: {files: readonly SummaryFile[]; durationMs: number; cancelled?: boolean},
+): void {
+    const lines = buildRunSummary(input);
+    testRun.appendOutput(toOutputChunk(`${lines.join("\n")}\n`), undefined, anchor);
 }
 
 /** 面板里的失败信息：标题用粗体一行，明细用列表（MarkdownString 才会按 Markdown 渲染） */

@@ -20,6 +20,7 @@
 | `core/lens.ts` | 生成 CodeLens 描述 + 命令 id 常量 |
 | `core/runnerArgs.ts` | 拼 runner 参数、拼可打印命令行、拼运行标题 |
 | `core/testResult.ts` | 解析 `RESULT-FILE:` / `RESULT-CASE:` 行、退出码映射、失败文案（短标题 + 明细列表）、拼 Markdown、`planFileMarking()` 决定每个节点标什么 |
+| `core/runSummary.ts` | 把一次运行压成测试输出末尾的结果块：结论 + 文件/用例计数 + 只列失败、没跑起来、缺图跳过的用例（纯字符串，可单测） |
 | `core/missingImages.ts` | 探测阶段查缺图：哪些声明平台没有这张截图、平台目录是否压根不存在，以及对应的诊断文案 |
 | `core/loaderMaps.ts` | 解析 `tests/scripts/loader.mts` 的 `controllerMap` / `resourceMap`（显示名 → 截图目录名），供补全、缺图检查、悬浮共用 |
 | `core/completion.ts` | 用 `jsonc-parser` 的 `getLocation` 判断光标在哪一层，给出该位置的候选（纯逻辑） |
@@ -180,8 +181,9 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 - **串行**：多个目标用一个 promise 队列逐个跑，避免同时起一堆 MaaFW。
 - **取消**：`CancellationToken` → `process.cancel()`，被取消的标 skipped。
 - **结果标记**：文件节点用 `**短标题**` + Markdown 列表（明细来自 `RESULT-CASE`）；有逐用例信息时子用例各按自己的结论标记，没被点名的按通过处理；一条逐用例信息都没有时，子用例跟随文件结论。
-- **缺图 = 跳过，不是失败**：声明的平台缺图时 maa-tools 会跳过该用例并判通过，文件也就没有断言失败。标记规则抽成 `core/testResult.ts` 的 `planFileMarking()`：这类用例在面板里标成 `skipped`（灰的），文件仍然通过，但文件节点的提示里写明「N 条用例没有验证到（缺图跳过，不算失败，补图后重跑即可）」+ 逐条列出，测试输出里也会打一遍。这样来不及补图时不会把整次运行染红，也不会让人误以为每条用例都验证过了。
+- **缺图 = 跳过，不是失败**：声明的平台缺图时 maa-tools 会跳过该用例并判通过，文件也就没有断言失败。标记规则抽成 `core/testResult.ts` 的 `planFileMarking()`：这类用例在面板里标成 `skipped`（灰的），文件仍然通过，但文件节点的提示里写明「N 条用例没有验证到（缺图跳过，不算失败，补图后重跑即可）」+ 逐条列出，测试输出末尾的结果块里也会列一遍。这样来不及补图时不会把整次运行染红，也不会让人误以为每条用例都验证过了。
 - 用例结论因此比文件多一种取值：`pass | fail | error | skipped`（`CaseOutcome`）。runner 侧由 `runner/lib/results.mjs` 的 `caseOutcome(info)` 判定：有失败报 `fail`，只有缺图报 `skipped`；扩展侧 `collectCaseVerdict()` 认得这四个值。
+- **测试输出分两段**：`appendOutput` 先把 runner 的原始 stdout 原样转发（前面一条分隔线 `RAW_LOG_BANNER`），跑完再往末尾贴一块结果（`core/runSummary.ts` 的 `buildRunSummary()`）—— 结论一行、文件/用例计数、耗时，然后只列失败 / 没跑起来 / 缺图跳过的用例，通过的不逐条刷。原始日志不能删（排错全靠它），所以做法是「补一块结构化的摘要」而不是过滤日志。结果块挂在本次运行的锚点节点上（批量跑时是第一个目标），单跑一条用例时形状相同。
 - **单条用例运行**：各自一次进程，退出码即结论，失败文案同样优先用 `RESULT-CASE` 给的原因。
 
 ## 换一个仓库来用要改什么
@@ -259,6 +261,7 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 | `src/core/runnerArgs.test.ts` | 参数拼装（有/无 `--case`、`--dry-run`）、命令行转义、标题 |
 | `src/core/testExplorer.test.ts` | 测试面板节点 label 回退、id 稳定、range 覆盖用例对象 |
 | `src/core/testResult.test.ts` | 结论行解析、坏载荷、退出码映射、文件/用例文案、Markdown 列表 |
+| `src/core/runSummary.test.ts` | 结果块的结论措辞、文件/用例计数、失败与缺图分段、取消、耗时格式 |
 | `runner/lib/*.test.mjs` | 用例键、过滤四条规则（含批量归属）、参数非法输入、`--case` 越界、截图路径与统计、PNG、RESULT 映射、逐用例失败分类与平台统计 |
 
 ## 目录结构
