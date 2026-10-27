@@ -361,23 +361,92 @@ code --install-extension dist/maa-node-test-0.1.0.vsix
 | 工作流 | 触发 | 做什么 |
 | --- | --- | --- |
 | `.github/workflows/test.yml` | push / PR 到 `main` | `pnpm install --frozen-lockfile` → 类型检查 → 两个单测套件 → 试打包 VSIX → 上传 artifact |
-| `.github/workflows/release.yml` | 打 `v*` 标签 | 核对标签与 `package.json` 版本一致 → 类型检查 + 单测 → 发布到 VS Marketplace → （可选）Open VSX → 建 GitHub Release 并附 vsix |
+| `.github/workflows/release.yml` | 手动触发（`workflow_dispatch`，选 `main`） | 确认在 `main` 的最新提交上运行 → 读 `package.json` 的版本号并检查同名标签是否已被占用 → 类型检查 + 单测 → `pnpm run package` 打出 VSIX → 用 `gh api` 打 `v<版本>` 标签 → 用 `gh release create` 建 Release 附 vsix → `vsce publish` 发 Marketplace → （可选）`ovsx publish` 发 Open VSX |
 
-需要的 secret：
+发布用官方的 `vsce` / `ovsx` 直发，不依赖第三方 action，仓库里**不存任何长期密钥**：
+
+| 目标 | 鉴权方式 |
+| --- | --- |
+| Visual Studio Marketplace | Trusted Publishing：`vsce publish --oidc`。GitHub Actions 申请短时效 OIDC token（靠 `permissions: id-token: write`），vsce 拿它向 `POST /_apis/gallery/token` 换 15 分钟会话 token |
+| Open VSX | `ovsx` 自己的 token，走 `OVSX_PAT` 环境变量；跟 Azure DevOps 的 PAT 退役无关 |
+
+GitHub Release 那一步**刻意排在发布市场之前**：只要测试和打包通过就会执行，把 vsix 挂上去。这样市场那边发不出去（例如 Trusted Publishing 还没上线）时，版本包照样能下载，可以走网页手动上传。
+
+**Trusted Publishing 的启用前提**（缺一条都发不出去）：
+
+1. 在 <https://marketplace.visualstudio.com/manage> 的 publisher 页面建一条 Trusted Publishing 策略，指明允许 `he0119/maa-node-test` 的 `release.yml` 发布。**这个页面 2026-10 还没上线**，官方在 [vsmarketplace#1422](https://github.com/microsoft/vsmarketplace/issues/1422) 里说目标是 2026-10-30，在此之前 `POST /_apis/gallery/token` 会返回 `TrustedPublishingNotSupportedException`；
+2. workflow 的 `permissions` 里有 `id-token: write`（已配）。
+
+页面还没上线时，发版这样处理：CI 照样打出 vsix 并建 Release，然后从 Release 页面下载 vsix，到 <https://marketplace.visualstudio.com/manage> 网页手动上传（网页上传走浏览器登录，不受 PAT 退役影响）。
+
+两种情况的本地验证（都在 GitHub Actions 之外跑，验证参数拼得对）：
+
+```bash
+pnpm run package
+pnpm exec vsce publish --packagePath dist/*.vsix --oidc --skip-duplicate   # 预期：No supported OIDC provider was detected
+GITHUB_ACTIONS=true pnpm exec vsce publish --packagePath dist/*.vsix --oidc --skip-duplicate
+    # 预期：提示 Add `permissions: id-token: write`，说明 OIDC 分支被正确触发
+OVSX_PAT=fake pnpm dlx ovsx@1.3.0 publish dist/*.vsix --skip-duplicate      # 预期：Invalid access token
+```
+
+需要的 secret 只剩一个：
 
 | secret | 用途 | 不给会怎样 |
 | --- | --- | --- |
-| `VS_MARKETPLACE_TOKEN` | 发布到 Visual Studio Marketplace 的 PAT（要带 Marketplace 的 Manage 权限，且账号能访问 `he0119` 这个 publisher） | 发布那一步直接失败 |
 | `OPEN_VSX_TOKEN` | 发布到 Open VSX（VSCodium 用户） | 那一步自动跳过 |
 
 ### 发版步骤
 
+`main` 上有 ruleset（要求走 PR、线性历史、`test` 检查通过），所以**版本号改动也得走 PR**；
+标签由工作流自己打，本地不用 `git tag`。
+
 ```bash
-pnpm version patch    # 或 minor / major：改版本号并打 v0.1.1 这样的标签
-git push --follow-tags
+# 1. 版本号 PR
+git checkout main && git pull
+git checkout -b chore/bump-0.1.1
+pnpm version patch --no-git-tag-version    # 只改 package.json，不提交也不打标签
+git commit -am "chore: 版本号改成 0.1.1"
+git push -u origin chore/bump-0.1.1
+gh pr create --base main --title "chore: 版本号改成 0.1.1" --body "…"
+
+# 2. 合进 main（规则要求线性历史，只能 squash 或 rebase）
+gh pr merge <PR 号> --squash
+
+# 3. 手动触发发布（工作流负责打标签、建 Release、发市场）
+gh workflow run release.yml --ref main
+gh run watch
 ```
 
-标签必须是 `v` 开头并和 `package.json` 的版本号一致，否则 release 工作流会在核对那一步停下（防止把错的版本发出去）。
+为什么不是「推标签触发」：用 `GITHUB_TOKEN` 建出来的标签**不会再触发其它工作流**（GitHub 防止递归），
+所以打标签和发布必须在同一个 run 里做完，触发方式换成手动触发。
+
+工作流自己会拦三种情况：
+
+- 不是从 `main` 触发（比如选了某个分支）→ 直接失败；
+- `main` 在上次触发后又有新提交 → 失败，要求先拉平（保证发的一定是最新 main）；
+- 同名标签已存在且指向别的提交 → 失败，要求先把版本号往上调。若标签已指向本次提交（上次跑到一半失败后重跑），
+  跳过创建继续发，方便重试。
+
+标签名从 `package.json` 推出来（`v<version>`），所以不存在「标签和版本号对不上」的情况。
+
+### 仓库上的两条 ruleset
+
+| 名称 | 目标 | 规则 | 作用 |
+| --- | --- | --- | --- |
+| `default` | 分支 `refs/heads/main` | PR、线性历史、`test` 检查 | 禁止直接推 `main`；合并只能 squash / rebase |
+| `release-tags` | 标签 `refs/tags/v*` | `deletion`、`update` | 已发布的版本标签不能删、不能移动（删了标签，Release 和市场里的版本就对不上了） |
+
+`release-tags` 没有任何绕过者，所以**你自己也删不掉标签**。确实要删的话，先把规则停用再删，删完记得开回来：
+
+```bash
+# 查 ruleset id
+gh api repos/{owner}/{repo}/rulesets -q '.[] | "\(.id) \(.name)"'
+# 停用（注意是 PUT，PATCH 会返回 404）
+gh api -X PUT repos/{owner}/{repo}/rulesets/<id> -f enforcement=disabled
+git push origin --delete v0.1.1     # 或 gh api -X DELETE repos/{owner}/{repo}/git/refs/tags/v0.1.1
+# 开回来
+gh api -X PUT repos/{owner}/{repo}/rulesets/<id> -f enforcement=active
+```
 
 ### pnpm 的构建脚本白名单
 

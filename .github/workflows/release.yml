@@ -1,49 +1,74 @@
 name: Release
 
-# 打一个 v 开头的标签就发一版，例如：
-#   pnpm version patch        # 改 package.json 版本号并打 tag
-#   git push --follow-tags
+# 手动触发：读 package.json 的版本号 → 在 main 最新提交上打 v<版本> 标签 → 建 Release → 发布市场。
+#
+# 为什么不是「推标签触发」：仓库里有 tag ruleset，只有这个工作流（GitHub Actions 应用）能建 v* 标签；
+# 而用 GITHUB_TOKEN 建出来的标签不会再触发其它工作流（GitHub 防止递归），所以整条链必须在一个 run 里跑完。
+#
+# 鉴权：
+# - Marketplace 走 Trusted Publishing（vsce publish --oidc）：GitHub Actions 申请短时效 OIDC token，
+#   前提是 publisher 页面里建过 Trusted Publishing 策略，且这里有 id-token: write；
+# - Open VSX 走它自己的 token（OVSX_PAT 环境变量），没配就跳过；
+# - 仓库里不存任何长期密钥。
+#
+# 顺序上刻意把「打标签 / 建 Release」放在发布之前：这样万一市场发不出去，标签和版本包都已经就位，
+# vsix 能从 Release 下载后手动上传。
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
 
 permissions:
-  contents: write # 建 GitHub Release 需要写权限
+  contents: write # 打标签、建 Release 需要写权限
+  id-token: write # 申请 OIDC token（Trusted Publishing）需要写权限
 
 jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # 没配 Open VSX 的 token 时，那一步会自动跳过
     env:
+      # 没配 Open VSX 的 token 时，那一步会自动跳过
       OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: 装 pnpm
-        uses: pnpm/action-setup@v4
+      # 一步装好 pnpm 和 Node，并缓存 pnpm store
+      - name: 装 pnpm 和 Node
+        uses: pnpm/setup@v3
         with:
           version: 12
-
-      - name: 装 Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
+          runtime: node@22
+          cache: true
 
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
 
-      - name: 核对标签和 package.json 的版本号
+      # 只允许在 main 的最新提交上发版：避免拿分支代码或过期提交发出去
+      - name: 确认在 main 的最新提交上运行
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          version="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$version" ]; then
-            echo "::error::标签是 $GITHUB_REF_NAME，但 package.json 里写的是 $version，两边必须一致"
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::请从 main 分支触发这个工作流（当前 ref 是 $GITHUB_REF）"
             exit 1
           fi
-          echo "准备发布 $version"
+          main_sha="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [ "$GITHUB_SHA" != "$main_sha" ]; then
+            echo "::error::main 上已经有更新的提交，请先拉平再触发（本次 $GITHUB_SHA，main 最新 $main_sha）"
+            exit 1
+          fi
+
+      # 版本号以 package.json 为准，标签名从它推出来，所以不会出现「标签和版本对不上」
+      - name: 读出版本号，检查标签是否可用
+        id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v$version"
+          existing="$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)"
+          if [ -n "$existing" ] && [ "$existing" != "$GITHUB_SHA" ]; then
+            echo "::error::标签 $tag 已存在且指向 $existing，与本次提交 $GITHUB_SHA 不同；先提 PR 把版本号往上调"
+            exit 1
+          fi
+          echo "tag_exists=$([ -n "$existing" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "准备发布 $tag"
 
       - name: 类型检查
         run: pnpm run check
@@ -51,27 +76,46 @@ jobs:
       - name: 单测（扩展纯函数 + runner）
         run: pnpm run test:all
 
-      # 这一步会自己跑 vsce package（顺带触发 vscode:prepublish → 编译 + esbuild 打包）
-      # 然后发布到市场，产物路径从 outputs.vsixPath 拿
+      # 自己打 VSIX（顺带触发 vscode:prepublish → 编译 + esbuild 打包），
+      # 后面的 Release 附件和各处发布都用这同一个文件
+      - name: 打 VSIX
+        run: pnpm run package
+
+      # 标签由工作流自己建：tag ruleset 只放行 GitHub Actions 应用建 v* 标签。
+      # 重跑时标签可能已经指向本次提交，这种情况跳过创建，失败后可以直接重跑。
+      - name: 打标签
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          if [ "${{ steps.version.outputs.tag_exists }}" = "true" ]; then
+            echo "标签 $tag 已指向本次提交（重跑），跳过创建"
+            exit 0
+          fi
+          gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" > /dev/null
+          echo "已创建标签 $tag → $GITHUB_SHA"
+
+      # 用 runner 自带的 gh 官方 CLI 建 Release，不依赖第三方 action。
+      # 重跑时 release 可能已经存在，所以先查一下再决定创建还是只覆盖附件。
+      - name: 建 GitHub Release 并附上 vsix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          vsix="$(ls dist/*.vsix)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag 已存在，只更新 vsix 附件"
+            gh release upload "$tag" "$vsix" --clobber
+          else
+            gh release create "$tag" "$vsix" --verify-tag --generate-notes
+          fi
+
       - name: 发布到 Visual Studio Marketplace
-        id: marketplace
-        uses: HaaLeo/publish-vscode-extension@v2
-        with:
-          pat: ${{ secrets.VS_MARKETPLACE_TOKEN }}
-          registryUrl: https://marketplace.visualstudio.com
+        run: pnpm exec vsce publish --packagePath dist/*.vsix --oidc --skip-duplicate
 
       # 可选：VSCodium / Open VSX 用户从这里装。没配 token 就跳过
       - name: 发布到 Open VSX
         if: ${{ env.OPEN_VSX_TOKEN != '' }}
-        uses: HaaLeo/publish-vscode-extension@v2
-        with:
-          pat: ${{ secrets.OPEN_VSX_TOKEN }}
-          registryUrl: https://open-vsx.org
-          extensionFile: ${{ steps.marketplace.outputs.vsixPath }}
-          skipDuplicate: true
-
-      - name: 建 GitHub Release 并附上 vsix
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ steps.marketplace.outputs.vsixPath }}
-          generate_release_notes: true
+        run: pnpm dlx ovsx@1.3.0 publish dist/*.vsix --skip-duplicate
+        env:
+          OVSX_PAT: ${{ secrets.OPEN_VSX_TOKEN }}
