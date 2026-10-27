@@ -164,3 +164,26 @@ test("面板短提示只列平台名", () => {
         "缺 ADB、CloudADB 截图",
     );
 });
+
+test("缺图检查：controller 有别名时按目录名判断，不误报", () => {
+    // loader 里 Win32-Front 和 Win32 指向同一个截图目录
+    const warnings = collectMissingImages({
+        cases: [testCase(0, "a.png")],
+        controllers: ["Win32-Front"],
+        locate: () => locations(["Win32"], ["Win32"]),
+        resolvePlatform: (controller) => (controller === "Win32-Front" ? "Win32" : controller),
+    });
+
+    assert.deepEqual(warnings, []);
+});
+
+test("缺图检查：别名平台的图真缺了，提示里写用户写的那个名字", () => {
+    const warnings = collectMissingImages({
+        cases: [testCase(0, "a.png")],
+        controllers: ["Win32-Front"],
+        locate: () => locations(["Win32"], []),
+        resolvePlatform: (controller) => (controller === "Win32-Front" ? "Win32" : controller),
+    });
+
+    assert.deepEqual(warnings[0].platforms, [{platform: "Win32-Front", hasDirectory: true}]);
+});

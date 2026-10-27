@@ -11,6 +11,8 @@ export interface ImageHoverInput {
     testsetExists: boolean;
     /** 按扫描结果逐个平台的查找结果 */
     locations: readonly ImageLocation[];
+    /** controller 显示名 → 截图目录名（loader 的映射）；别名指向同一目录时不能算「没有这个平台」 */
+    controllerDirs?: ReadonlyMap<string, string>;
     /**
      * 预览图的显示宽度（像素）。0 表示按原图尺寸显示。
      * 1280×720 的截图按原尺寸塞进悬浮会占掉半屏，默认缩到 400 宽，看不清再点「打开原图」。
@@ -62,7 +64,8 @@ export function buildImageHoverMarkdown(input: ImageHoverInput, toUriString: (ab
 /** 本文件声明了、但测试集里没扫到的平台（名字对不上或目录缺失） */
 function declaredButAbsent(input: ImageHoverInput): string[] {
     const scanned = new Set(input.locations.map((location) => location.platform));
-    return [...new Set(input.controllers)].filter((controller) => !scanned.has(controller));
+    const dirOf = (controller: string): string => input.controllerDirs?.get(controller) ?? controller;
+    return [...new Set(input.controllers)].filter((controller) => !scanned.has(dirOf(controller)));
 }
 
 function describeFound(foundCount: number, totalCount: number, testsetLabel: string): string {

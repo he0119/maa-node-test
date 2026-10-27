@@ -17,6 +17,7 @@ Maa 节点测试的 VS Code 插件，基于 `maa-tools` 的节点测试机制（
 - **报告失败原因**：失败的平台、未命中的节点、识别框偏差，均写入测试面板。
 - **对照各平台截图**：悬浮提示展示 Win32 / ADB / CloudADB 下的同名截图，缺失的平台单独标注。
 - **写用例时就提示缺图**：声明的平台没有这张截图时，`image` 的值下面直接出现黄色波浪线，测试面板里的用例节点也会写「缺 ADB 截图」。
+- **字段补全**：`controller` / `resource` 补的是 `tests/scripts/loader.mts` 里登记过的名字，`image` 补测试集里真实存在的截图（按本文件声明的平台收窄），`hits` 补 pipeline 里的节点名；各级对象的键也能补。
 - **测试面板集成**：以「目录 → 测试文件 → 用例」三层组织，目录、文件、单条用例均可运行。
 
 ## 范围
@@ -199,6 +200,8 @@ pnpm run compile
 1. 工作区根有 `maatools.config.mts`（`maa-tools` 的默认约定）；
 2. 测试文件叫 `tests/**/test_*.json`（同上）；
 3. 截图按 `<控制器>/<资源服>/<图片>` 分目录放在测试集里。默认路径是 `tests/MaaEndTestset`（MaaEnd 的写法），别的仓库用 `maaNodeTest.testsetDir` 指过去。
+
+补全和缺图检查都读 `tests/scripts/loader.mts` 里的 `controllerMap` / `resourceMap`：那是「测试文件里写的名字 → 截图目录名」的唯一依据。没有这个文件时，插件按同名处理，补全只给测试集里扫到的平台目录名。
 
 图标 `icon.png` 用的是 MaaEnd 项目的 logo（512×512）。fork 之后要换成自己的图标，直接替换这个文件即可。
 

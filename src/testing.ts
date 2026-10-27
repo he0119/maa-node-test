@@ -80,7 +80,11 @@ export class NodeTestExplorer implements vscode.Disposable {
     /** 探测阶段就报缺图：写用例时在 image 值下面直接画黄线，不用等跑完 */
     private readonly diagnostics = vscode.languages.createDiagnosticCollection("maaNodeTest");
 
-    constructor(private readonly extensionPath: string) {
+    constructor(
+        private readonly extensionPath: string,
+        /** controller 显示名 → 截图目录名（loader 的别名映射）；不传就按同名处理 */
+        private readonly resolveController: (controller: string) => string = (controller) => controller,
+    ) {
         this.controller = vscode.tests.createTestController("maaNodeTest", "Maa 节点测试");
         this.controller.refreshHandler = () => this.refresh();
 
@@ -212,6 +216,7 @@ export class NodeTestExplorer implements vscode.Disposable {
                 cases: entry.parsed.cases,
                 controllers: entry.parsed.configs.controller,
                 locate,
+                resolvePlatform: this.resolveController,
             });
             if (warnings.length === 0) continue;
 

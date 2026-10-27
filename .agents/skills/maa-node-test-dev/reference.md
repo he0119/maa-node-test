@@ -21,6 +21,9 @@
 | `core/runnerArgs.ts` | 拼 runner 参数、拼可打印命令行、拼运行标题 |
 | `core/testResult.ts` | 解析 `RESULT-FILE:` / `RESULT-CASE:` 行、退出码映射、失败文案（短标题 + 明细列表）、拼 Markdown、`planFileMarking()` 决定每个节点标什么 |
 | `core/missingImages.ts` | 探测阶段查缺图：哪些声明平台没有这张截图、平台目录是否压根不存在，以及对应的诊断文案 |
+| `core/loaderMaps.ts` | 解析 `tests/scripts/loader.mts` 的 `controllerMap` / `resourceMap`（显示名 → 截图目录名），供补全、缺图检查、悬浮共用 |
+| `core/completion.ts` | 用 `jsonc-parser` 的 `getLocation` 判断光标在哪一层，给出该位置的候选（纯逻辑） |
+| `core/repoIndex.ts` | 补全的数据来源：loader 映射、测试集截图名、pipeline 节点名，各自带缓存 |
 | `core/testExplorer.ts` | 把测试文件翻成测试面板的树描述（id、label、description、range）；`folderSegments()` 决定目录分组层级 |
 
 ### `runner/`
@@ -192,6 +195,16 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 | `maaNodeTest.nodePath` | `node` | 跑测试的 node，要求 22+ |
 | `maaNodeTest.configPath` | `maatools.config.mts` | 认定仓库根；runner 的 `--config` |
 | `maaNodeTest.testsetDir` | `tests/MaaEndTestset` | hover 扫描截图的根目录 |
+
+## 补全
+
+- **数据来源全是仓库自己的**：`controller` / `resource` 取自 `tests/scripts/loader.mts` 的映射表（不写死名字，`Win32-Front` 这种别名也会出现，detail 里标出它对应哪个截图目录）；`image` 取测试集里真实存在的 png，按本文件 `configs.controller` 换算成目录后收窄；`hits`（含 `{node: ...}` 写法）取 `assets/resource/pipeline/**` 的顶层键。
+- **判断光标在哪一层用 `jsonc-parser` 的 `getLocation`**，别自己扫文本。有个坑：**在写键时它会把「已经敲进去的半截键名」当成最后一个路径段**（`{"configs": {` → `['configs','']`），所以 `completionContextAt()` 在 `atKey` 时 `path.pop()` 一次，路径才是「光标所在的那个对象」。
+- **拿不准就不给候选**：`name`、`imageRoot`、`box` 这些没有可枚举取值的字段返回空数组，宁可不弹也别给错的值。
+- **插入文本看上下文**：光标已经在字符串里（`inString`）就只插内容，否则连引号一起插。
+- **缓存**：loader 映射按 mtime 缓存；截图列表按各平台目录 mtime 合成戳；节点名懒加载并缓存 10 秒（421 个 pipeline 文件首次约 36ms，之后 0ms）。不触发补全就不会扫。
+- **别名一致性**：`loaderMaps.resolveControllerDir()` 是唯一的换名入口，缺图检查和悬浮也走它 —— 否则 `Win32-Front` 会被误报成「测试集里没有这个平台的目录」。
+- **loader 解析用正则**：只取两个对象字面量的键值，注释掉的条目要剔除（loader 里常用注释占位）。别为了 4KB 文件引入 TypeScript 解析器。
 
 ## 单测地图
 

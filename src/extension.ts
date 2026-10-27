@@ -5,6 +5,9 @@ import {isTestFilePath, parseTestDocument} from "./core/document";
 import type {TestDocument} from "./core/document";
 import {RUN_CASE_COMMAND, RUN_FILE_COMMAND, SHOW_PLAN_COMMAND} from "./core/lens";
 import {NodeTestCodeLensProvider, TEST_FILE_SELECTOR} from "./providers/codeLens";
+import {resolveControllerDir} from "./core/loaderMaps";
+import {RepoIndex} from "./core/repoIndex";
+import {NodeTestCompletionProvider} from "./providers/completion";
 import {NodeTestHoverProvider} from "./providers/hover";
 import {describeError, killRunningTests, NodeTestRunner} from "./runner";
 import type {RunRequest} from "./runner";
@@ -13,12 +16,15 @@ import {NodeTestExplorer, REFRESH_TESTS_COMMAND} from "./testing";
 /** 当前激活的 runner 和测试面板，只有 deactivate 时才会置空 */
 let runner: NodeTestRunner | undefined;
 let explorer: NodeTestExplorer | undefined;
+/** 补全用的仓库索引：按工作区缓存，换工作区或改设置就重建 */
+let repoIndex: RepoIndex | undefined;
+let repoIndexKey = "";
 
 /** 这里只做装配：创建输出通道、注册 provider 和命令，具体逻辑各在各的模块里 */
 export function activate(context: vscode.ExtensionContext): void {
     const output = vscode.window.createOutputChannel("Maa 节点测试");
     runner = new NodeTestRunner(output, context.extensionPath);
-    explorer = new NodeTestExplorer(context.extensionPath);
+    explorer = new NodeTestExplorer(context.extensionPath, resolveController);
 
     context.subscriptions.push(
         output,
@@ -26,7 +32,13 @@ export function activate(context: vscode.ExtensionContext): void {
         // 测试面板：把 tests 下的用例做成可以单个运行的测试树
         explorer,
         vscode.languages.registerCodeLensProvider(TEST_FILE_SELECTOR, new NodeTestCodeLensProvider()),
-        vscode.languages.registerHoverProvider(TEST_FILE_SELECTOR, new NodeTestHoverProvider()),
+        vscode.languages.registerHoverProvider(TEST_FILE_SELECTOR, new NodeTestHoverProvider(currentRepoIndex)),
+        // 补全：controller / resource 取 loader 里的映射，image 取测试集里的截图，hits 取 pipeline 节点
+        vscode.languages.registerCompletionItemProvider(
+            TEST_FILE_SELECTOR,
+            new NodeTestCompletionProvider(currentRepoIndex),
+            '"',
+        ),
         vscode.commands.registerCommand(RUN_FILE_COMMAND, (uri?: unknown) => runWholeFile(uri)),
         vscode.commands.registerCommand(RUN_CASE_COMMAND, (uri?: unknown, caseIndex?: unknown) =>
             runOneCase(uri, caseIndex),
@@ -34,6 +46,24 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand(SHOW_PLAN_COMMAND, (uri?: unknown) => showPlan(uri)),
         vscode.commands.registerCommand(REFRESH_TESTS_COMMAND, () => explorer?.refresh()),
     );
+}
+
+/** 把测试文件里的 controller 名字换成截图目录名（loader 里有别名时，例如 Win32-Front → Win32） */
+function resolveController(controller: string): string {
+    return repoIndex ? resolveControllerDir(repoIndex.maps(), controller) : controller;
+}
+
+/** 拿当前的仓库索引；工作区根或测试集目录变了就换一个新的，缓存跟着更新 */
+function currentRepoIndex(): RepoIndex | null {
+    const workspace = resolveNodeTestWorkspace();
+    if (!workspace) return null;
+
+    const key = `${workspace.workspaceRoot}|${workspace.testsetRoot}`;
+    if (!repoIndex || repoIndexKey !== key) {
+        repoIndex = new RepoIndex(workspace.workspaceRoot, workspace.testsetRoot);
+        repoIndexKey = key;
+    }
+    return repoIndex;
 }
 
 /** 卸载时把还没跑完的 node 进程收掉，别留孤儿 */

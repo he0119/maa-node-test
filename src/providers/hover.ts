@@ -11,6 +11,12 @@ import {locateImage} from "../core/testset";
  * 找到的直接内嵌预览。其它位置一律不弹。
  */
 export class NodeTestHoverProvider implements vscode.HoverProvider {
+    /** 索引只用来拿「显示名 → 截图目录名」这张表，其它数据不走这里 */
+    constructor(
+        private readonly indexOf: () => {controllers: readonly {name: string; dir: string | null}[]} | null = () =>
+            null,
+    ) {}
+
     provideHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | null {
         const parsed = parseTestDocument(document.getText());
         if (parsed.problems.length > 0) return null;
@@ -35,6 +41,7 @@ export class NodeTestHoverProvider implements vscode.HoverProvider {
                 testsetLabel: workspace.testsetDir,
                 testsetExists: existsSync(workspace.testsetRoot),
                 locations: locateImage(workspace.testsetRoot, field.value),
+                controllerDirs: controllerDirsOf(this.indexOf()),
                 imageWidth: workspace.hoverImageWidth,
             },
             toMarkdownUri,
@@ -44,6 +51,15 @@ export class NodeTestHoverProvider implements vscode.HoverProvider {
         contents.supportHtml = true;
         return new vscode.Hover(contents, imageValueRange(document, field));
     }
+}
+
+/** 显示名 → 目录名；没有索引时给空表，调用方按同名处理 */
+function controllerDirsOf(
+    index: {controllers: readonly {name: string; dir: string | null}[]} | null,
+): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const entry of index?.controllers ?? []) map.set(entry.name, entry.dir ?? entry.name);
+    return map;
 }
 
 /** hover 范围只圈住 image 的字符串值，跟着鼠标走，不会整块闪 */

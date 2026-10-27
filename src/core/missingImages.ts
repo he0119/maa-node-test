@@ -36,6 +36,11 @@ export interface MissingImageInput {
     controllers: readonly string[];
     /** 按图片名查各平台/资源下的命中情况（由调用方注入，便于单测和复用扫描结果） */
     locate: (image: string) => readonly ImageLocation[];
+    /**
+     * 把测试文件里的 controller 名字换成截图目录名。
+     * 有别名时（loader 里 `Win32-Front` 和 `Win32` 指向同一个目录）必须换，否则会误报「没有这个平台目录」。
+     */
+    resolvePlatform?: (controller: string) => string;
 }
 
 /**
@@ -60,10 +65,15 @@ export function collectMissingImages(input: MissingImageInput): MissingImageWarn
             locations.filter((item) => item.filePath !== null).map((item) => item.platform),
         );
         const platformsScanned = new Set(locations.map((item) => item.platform));
+        // 别名（Win32-Front → Win32）要先换成目录名再比对，否则会被当成「没有这个平台」
+        const resolve = input.resolvePlatform ?? ((controller: string) => controller);
 
         const platforms = input.controllers
-            .filter((controller) => !platformsPresent.has(controller))
-            .map((controller) => ({platform: controller, hasDirectory: platformsScanned.has(controller)}));
+            .filter((controller) => !platformsPresent.has(resolve(controller)))
+            .map((controller) => ({
+                platform: controller,
+                hasDirectory: platformsScanned.has(resolve(controller)),
+            }));
 
         if (platforms.length === 0) continue;
 
