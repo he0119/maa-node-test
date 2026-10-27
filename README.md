@@ -169,6 +169,12 @@ pnpm run compile
 **测试面板是空的。**
 当前窗口的工作区不是被测仓库，或者仓库里没有 `tests/**/test_*.json`。按上面的方式一重新打开。
 
+**调试窗口（F5）起来十来秒就整个关掉，控制台没有任何报错。**
+
+在远端（Remote-SSH）调试时遇到过：`vadimcn.vscode-lldb` 这个扩展会让调试窗口的扩展宿主在启动 10～15 秒后被系统强制结束（服务端日志里是 `Extension Host Process exited with code: null, signal: SIGABRT`），窗口随之关闭，而客户端和服务端都留不下任何 JavaScript 报错。跟本插件无关（那个窗口里插件的输出通道一行字都没有）。
+
+绕开办法：`.vscode/launch.json` 里选「运行 Maa 节点测试插件（禁用 lldb，远端调试窗口会崩时用）」这个配置，它只是多带一个 `--disable-extension=vadimcn.vscode-lldb`。需要 LLDB 调试时再切回普通配置。
+
 **点运行，提示「没跑起来」。**
 大多是 node 版本低于 22，用 `maaNodeTest.nodePath` 指到 22+ 的 node。也可能是第一次运行要联网下载 MaaFW 失败，看「Maa 节点测试」输出面板里的 prepare 日志。
 
