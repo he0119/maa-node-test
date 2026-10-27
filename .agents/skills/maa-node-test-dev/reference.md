@@ -173,7 +173,8 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 
 ## 测试面板语义
 
-- **发现**：`findFiles` 扫 `test_*.json` 与 `test_*.jsonc`，按 `isTestFilePath()` 过滤；按相对路径排序后用 `folderSegments()` 建「目录 → 文件 → 用例」三层树（`tests` 这层省略，目录灰字是「含 N 个测试文件」）。JSON 坏掉的跳过并 `console.warn`，不影响整个面板。保存文件后 300ms 防抖刷新。
+- **发现**：`findFiles` 扫 `test_*.json` 与 `test_*.jsonc`，按 `isTestFilePath()` 过滤；按相对路径排序后用 `folderSegments()` 建「目录 → 文件 → 用例」三层树（`tests` 这层省略，目录节点只有名字、不写灰字）。JSON 坏掉的跳过并 `console.warn`，不影响整个面板。保存文件后 300ms 防抖刷新。
+- **控制器显示名是 `Maa Node Test`**（`createTestController("maaNodeTest", "Maa Node Test")`），和 `package.json` 的 `displayName` 是同一个字符串：用户在测试面板看到这行名字时，要能拿着它去扩展列表里对号。面板里的灰字、命令分类、输出面板保持中文——灰字里混着用户自己测试文件里的中文组名，翻成英文只会更难读。
 - **探测阶段就报缺图**（`reportMissingImages()` + `core/missingImages.ts`）：刷新时对每个用例算「本文件声明的平台里，哪些没有这张截图」，然后（1）在 `image` 值上画 Warning 级诊断（`DiagnosticCollection("maaNodeTest")`），（2）把「缺 ADB、CloudADB 截图」拼进用例节点的 description。这样写用例的时候就知道声明了却没截图，不用等跑完 —— 跑完 maa-tools 会把缺图的用例当通过。整个扫描对 48 个测试文件实测约 60ms（同一图片名的扫描结果按名字缓存），可以放心跟着刷新走。
 - 缺图诊断只判断「某些声明平台没有这张图」，不做资源服（`Official_CN` 之类）的匹配 —— 测试集的一级目录是平台，二级目录是资源，而用例声明的 `configs.resource` 是显示名（`官服`），两者没有对应关系可依赖。
 - **节点的身份**：每个叶子节点（文件、用例）登记在 `leaves: Map<id, {filePath, relativePath, caseIndex?}>` 里，运行时只认这张表，不靠解析 id 字符串 —— 目录节点因此不需要挂 uri，也不会被误当成可运行的东西。

@@ -1,11 +1,11 @@
 <!-- markdownlint-disable MD033 MD041 -->
 <p align="center">
-  <img alt="Maa 节点测试插件" src="./icon.png" width="256" height="256" />
+  <img alt="Maa Node Test" src="./icon.png" width="256" height="256" />
 </p>
 
 <div align="center">
 
-# Maa 节点测试插件
+# Maa Node Test
 
 </div>
 
@@ -43,7 +43,7 @@ Maa 节点测试的 VS Code 插件，基于 `maa-tools` 的节点测试机制（
 
 还没发布到市场。发布之后可以：
 
-- 在 VS Code 的扩展面板里搜「Maa 节点测试」安装；
+- 在 VS Code 的扩展面板里搜「Maa Node Test」安装；
 - 或者从 GitHub Release 下载 `.vsix`，用 `code --install-extension maa-node-test-<版本>.vsix` 安装。
 
 维护者发一版分两步（`main` 有分支保护，版本号改动也得走 PR）：
@@ -99,7 +99,8 @@ pnpm run compile
 
 左侧活动栏的烧瓶图标（测试）：
 
-- 树是三层：**目录 → 测试文件 → 用例**。目录按 `tests` 下的实际文件夹生成（`tests` 这层省略），灰字写「含 N 个测试文件」；
+- 左侧测试面板里的控制器叫 **Maa Node Test**，跟扩展在商店里的名字一致；
+- 树是三层：**目录 → 测试文件 → 用例**。目录按 `tests` 下的实际文件夹生成（`tests` 这层省略），目录名后面不带「含 N 个测试文件」这类灰字；
 - 文件节点标题是文件名，灰字写测试组名、平台/资源矩阵和用例数；
 - 用例节点标题优先用 `name`，没有就用图片名（去掉扩展名），灰字是图片文件和预期命中节点数；
 - 点目录的播放键 → 下面所有文件**一次进程**跑完；点文件 → 这个文件所有用例；点单条用例 → 只跑这一条；
