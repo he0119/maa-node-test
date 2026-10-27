@@ -12,6 +12,8 @@ export interface NodeTestConfig {
     testsetDir: string;
     /** 悬浮里预览图的显示宽度，0 表示按原图尺寸 */
     hoverImageWidth: number;
+    /** 是否在 hits 里的节点名后面显示注释（内联提示） */
+    hitsInlayHints: boolean;
 }
 
 /** 设置 + 解析好的工作区根目录，命令和 hover 都从这里取 */
@@ -24,6 +26,8 @@ export interface NodeTestWorkspace {
     testsetRoot: string;
     /** 悬浮里预览图的显示宽度，0 表示按原图尺寸 */
     hoverImageWidth: number;
+    /** 是否在 hits 里的节点名后面显示注释（内联提示） */
+    hitsInlayHints: boolean;
 }
 
 const SECTION = "maaNodeTest";
@@ -40,6 +44,7 @@ export function readNodeTestConfig(): NodeTestConfig {
         configPath: toPosix(nonEmpty(config.get<string>("configPath")) ?? DEFAULT_CONFIG_PATH),
         testsetDir: toPosix(nonEmpty(config.get<string>("testsetDir")) ?? DEFAULT_TESTSET_DIR),
         hoverImageWidth: readWidth(config.get<number>("hoverImageWidth")),
+        hitsInlayHints: config.get<boolean>("hitsInlayHints") ?? true,
     };
 }
 

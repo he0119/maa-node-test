@@ -10,6 +10,7 @@ import {RepoIndex} from "./core/repoIndex";
 import {NodeTestCompletionProvider} from "./providers/completion";
 import {NodeTestDefinitionProvider} from "./providers/definition";
 import {NodeTestHoverProvider} from "./providers/hover";
+import {NodeTestInlayHintsProvider} from "./providers/inlayHints";
 import {describeError, killRunningTests, NodeTestRunner} from "./runner";
 import type {RunRequest} from "./runner";
 import {NodeTestExplorer, REFRESH_TESTS_COMMAND} from "./testing";
@@ -38,6 +39,11 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.languages.registerDefinitionProvider(
             TEST_FILE_SELECTOR,
             new NodeTestDefinitionProvider(currentRepoIndex),
+        ),
+        // hits 里的节点名后面贴一句注释（pipeline 的 desc），点一下跳过去
+        vscode.languages.registerInlayHintsProvider(
+            TEST_FILE_SELECTOR,
+            new NodeTestInlayHintsProvider(currentRepoIndex, () => readNodeTestConfig().hitsInlayHints),
         ),
         // 补全：controller / resource 取 loader 里的映射，image 取测试集里的截图，hits 取 pipeline 节点
         vscode.languages.registerCompletionItemProvider(

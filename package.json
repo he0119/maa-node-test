@@ -79,6 +79,11 @@
                     "default": 400,
                     "minimum": 0,
                     "markdownDescription": "悬浮预览里截图显示宽度（像素）。0 表示按原图尺寸显示。默认 400，看不清细节时点悬浮里的「打开原图」。"
+                },
+                "maaNodeTest.hitsInlayHints": {
+                    "type": "boolean",
+                    "default": true,
+                    "markdownDescription": "在 `hits` 里的节点名后面显示该节点的注释（pipeline 里的 `desc`），点提示可跳到定义。"
                 }
             }
         }

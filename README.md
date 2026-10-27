@@ -19,6 +19,7 @@ Maa 节点测试的 VS Code 插件，基于 `maa-tools` 的节点测试机制（
 - **写用例时就提示缺图**：声明的平台没有这张截图时，`image` 的值下面直接出现黄色波浪线，测试面板里的用例节点也会写「缺 ADB 截图」。
 - **字段补全**：`controller` / `resource` 补的是 `tests/scripts/loader.mts` 里登记过的名字，`image` 补测试集里真实存在的截图（按本文件声明的平台收窄），`hits` 补 pipeline 里的节点名；各级对象的键也能补。
 - **节点注释与跳转**：`hits` 里的节点名，展开补全能看到它在 pipeline 里的 `desc` 和定义位置；鼠标放上去显示注释、识别/动作和节点源码片段；Ctrl+Click 或 F12 直接跳到定义。
+- **内联提示**：`hits` 里每个节点名后面直接贴一句灰色注释（就是 pipeline 里的 `desc`），一屏能同时看到好几个节点各自是干什么的；点提示跳到定义。不喜欢可以在设置里关掉。
 - **测试面板集成**：以「目录 → 测试文件 → 用例」三层组织，目录、文件、单条用例均可运行。
 
 ## 范围
@@ -155,6 +156,7 @@ pnpm run compile
 | `maaNodeTest.configPath` | `maatools.config.mts` | maa-tools 配置文件，相对工作区根。用来认定哪个工作区文件夹是「仓库根」 |
 | `maaNodeTest.testsetDir` | `tests/MaaEndTestset` | 截图根目录，相对工作区根。悬浮预览按它扫描平台目录 |
 | `maaNodeTest.hoverImageWidth` | `400` | 悬浮里预览图的显示宽度（像素）。`0` 表示按原图尺寸 |
+| `maaNodeTest.hitsInlayHints` | `true` | 是否在 `hits` 的节点名后面显示注释（内联提示） |
 
 ## 常见问题
 

@@ -24,7 +24,9 @@
 | `core/loaderMaps.ts` | 解析 `tests/scripts/loader.mts` 的 `controllerMap` / `resourceMap`（显示名 → 截图目录名），供补全、缺图检查、悬浮共用 |
 | `core/completion.ts` | 用 `jsonc-parser` 的 `getLocation` 判断光标在哪一层，给出该位置的候选（纯逻辑） |
 | `core/repoIndex.ts` | 补全的数据来源：loader 映射、测试集截图名、pipeline 节点索引，各自带缓存 |
+| `core/hits.ts` | 解析测试文件里 `hits` 的每一项（字符串和 `{node: ...}` 两种写法）及其位置，供内联提示用；提示文案的截断也在这里 |
 | `core/pipeline.ts` | 解析 pipeline 文件里每个节点的位置与说明（`desc` / `focus` / 识别 / 动作），以及 `hits` 路径判断 |
+| `providers/inlayHints.ts` | `hits` 节点名后面的注释（`desc`），点击跳定义 |
 | `providers/definition.ts` | `hits` 里的节点名 Ctrl+Click / F12 跳到 pipeline 里的定义 |
 | `core/testExplorer.ts` | 把测试文件翻成测试面板的树描述（id、label、description、range）；`folderSegments()` 决定目录分组层级 |
 
@@ -215,14 +217,18 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 
 | 场景 | 表现 | 实现 |
 | --- | --- | --- |
+| 内联提示 | 节点名后面贴一句 `desc`（压成一行、最多 32 字），点一下跳到定义 | `providers/inlayHints.ts`，只处理可见范围内的 | 
 | 补全（展开候选） | `desc` + `Reco: X · Act: Y` + `定义在 \`path:line\`` | `resolveCompletionItem` 懒填 |
 | 悬浮节点名 | 名称 + `path:line`，`desc`、Reco/Act，**节点源码 JSON 片段**（超过 40 行截断） | `providers/hover.ts` 的 `nodeHover()` |
-| Ctrl+Click / F12 | 跳到节点名在 pipeline 文件里的位置 | `providers/definition.ts` |
+| Ctrl+Click / F12 | 跳到节点名在 pipeline 文件里的位置 | `providers/inlayHints.ts` | `hits` 节点名后面的注释（`desc`），点击跳定义 |
+| `providers/definition.ts` |
 
 - 三种能力都只认 `cases[n].hits[m]` 和 `cases[n].hits[m].node` 这两个路径（`isHitsEntryPath()`），在 `name`、`image` 里点到同名文字不跳也不弹；
 - 节点名写错时：悬浮说「pipeline 里没有这个节点」，跳转给空；
 - 识别/动作的取值要兼容两种写法：字符串（`"recognition": "TemplateMatch"`）和对象（`{"type": "TemplateMatch"}`），没写就退回 `custom_recognition` / `custom_action`；
 - 源码片段按 `keyOffset` 到 `endOffset` 从原文截，所以悬浮里看到的就是 pipeline 里真实的那一段，不是重新序列化的结果；
+- 内联提示的开关是 `maaNodeTest.hitsInlayHints`（默认开）。位置取节点名字符串的末尾，紧跟原文；目标文件位置按索引里的行号算，点击用 `vscode.open` + `selection`，不需要先打开目标文件；
+- 内联提示只对**能解析出 `desc` / `focus` / 识别方式**的节点出现，也只在 `hits` 里出现，写错的节点名不提示（免得满屏噪音）；
 - 悬停里的图片、节点合并结果这些参考实现有的东西**没做** —— 那是给 pipeline 编辑器看的，节点测试只需要「这是哪个节点、它想识别什么」。
 
 ## 单测地图
