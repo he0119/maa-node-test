@@ -137,7 +137,7 @@ export function startTestProcess(
 
 function buildRunnerArgsIn(request: RunRequest, extensionPath: string): string[] {
     return buildRunnerArgs({
-        runnerScriptPath: path.join(extensionPath, "runner", "run-single-test.mjs"),
+        runnerScriptPath: path.join(extensionPath, "dist", "run-single-test.mjs"),
         workspaceRoot: request.workspaceRoot,
         configPath: request.configPath,
         testFile: request.testFile,

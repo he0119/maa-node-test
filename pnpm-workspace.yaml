@@ -1,0 +1,8 @@
+# pnpm 12 用这里的 allowBuilds 决定「哪些依赖允许在安装时跑自己的脚本」，
+# package.json 里的 pnpm 字段已经不生效了（pnpm 10 起搬到这里，键名也换过）。
+#
+# esbuild：装的时候要跑一次脚本准备二进制，必须放行。
+# @vscode/vsce-sign：只在给 VSIX 做签名发布时用，我们不签，直接禁掉省一次下载。
+allowBuilds:
+    "@vscode/vsce-sign": false
+    esbuild: true

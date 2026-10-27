@@ -12,10 +12,13 @@
 
 ```bash
 pnpm run check        # 类型检查（tsc --noEmit）
-pnpm run compile      # 编译到 out/
+pnpm run compile      # 编译到 out/（单测和调试用）
+pnpm run bundle       # esbuild 打包到 dist/（发布用，改了 runner 也要重跑）
+pnpm run build        # compile + bundle
 pnpm test             # src/core 纯函数单测（node --test）
 pnpm run test:runner  # runner 的纯函数单测
-pnpm run test:all     # 上面三件事
+pnpm run test:all     # build + 两个单测套件
+pnpm run package      # 打 VSIX 到 dist/
 ```
 
 端到端验证（真的跑识别，需要 MaaEnd 仓库装好依赖、MaaFW 已缓存）：
@@ -54,6 +57,8 @@ node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
 4. **hover 里的图片用 Markdown 图片语法**（`![](file:///…)`），不用 HTML `<img>`：Markdown 语法在悬浮里稳定可见，HTML 会被过滤规则牵着走。
 5. **`.code-workspace` 必须保持纯 JSON**（不带尾逗号），它已在 `.prettierignore` 里，别为了「格式化」把它改坏。
 6. **判定语义不能想当然**：`maa-tools` 遇到不存在的截图只打印 `not exists, ignored` 然后跳过，跳过即视为通过 —— 任何新逻辑都不能把「没验证」当成「通过」。
+7. **运行时依赖只能进 `dist/`，不能进 `dependencies`**：vsce 在 pnpm 仓库里解析不了生产依赖，包必须自包含。要加运行时依赖就改 `scripts/bundle.mjs` 让它被打进去（同时保持 `dependencies` 为空），否则装到 VS Code 里会 `Cannot find module`。
+8. **扩展 spawn 的是 `dist/run-single-test.mjs`**，不是 `runner/run-single-test.mjs`。改了 `runner/**` 之后记得 `pnpm run bundle`（或者挂着 `pnpm run watch:bundle`），否则扩展跑的还是旧代码。
 
 ## 调试时窗口的工作区必须是 MaaEnd
 
@@ -64,4 +69,5 @@ node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
 - 行为、设置项、限制有变化：同步 `README.md`（它面向使用者，只写「怎么用、怎么排错」）；
 - 契约、内部机制有变化：同步 `reference.md`（面向改代码的人）；
 - 契约或设计有变化：更新对应的 [Agent Note](.agents/notes/README.md)，不要新开一份重复的；
+- 发布相关：`dist/` 和 `*.vsix` 不进 git；发版细节见 `reference.md` 的「构建与发布」；
 - 提交信息用中文约定式提交（`feat:` / `fix:` / `chore:` / `docs:` / `refactor:`，可带 scope），一次提交讲一件事。

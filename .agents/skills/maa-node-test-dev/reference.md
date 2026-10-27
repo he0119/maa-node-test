@@ -244,3 +244,67 @@ node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
   --file tests/Common/Button/test_close_button.json \
   --file tests/Common/Button/test_change_region_button.json
 ```
+
+## 构建与发布
+
+### 为什么要用 esbuild 打包
+
+发布前必须把扩展和 runner 各自打成一个文件，原因是 vsce 的工作方式：
+
+1. vsce 判断「要带哪些生产依赖」靠的是 `npm list`。仓库用 pnpm，`node_modules` 是软链接树，`npm list` 会报一堆 missing（`math-intrinsics`、`dunder-proto` 之类），打包直接失败；换 `--no-dependencies` 又不会把依赖放进包，装到 VS Code 里就会 `Cannot find module 'jsonc-parser'`。
+2. 把运行时依赖打进 `dist/` 之后，`package.json` 里没有 `dependencies`，vsce 不需要解析依赖，包也更小。
+
+两个产物（`scripts/bundle.mjs`）：
+
+| 产物 | 格式 | 说明 |
+| --- | --- | --- |
+| `dist/extension.js` | CommonJS | 扩展入口，`package.json` 的 `main` 指向它；`vscode` 必须 external |
+| `dist/run-single-test.mjs` | ESM | runner 入口，扩展 spawn 的就是它；终端里也能直接跑 |
+
+两个容易踩的点：
+
+- **`jsonc-parser` 必须用 esm 版**：它的 umd 版在运行期 `require("./impl/xxx")` 懒加载，打不进包，会报 `Cannot find module './impl/format'`。所以 bundle 里设了 `mainFields: ["module", "main"]`。
+- **runner 是 ESM 且有顶层 await**，不能改成 CommonJS。
+
+顺带记一笔：rolldown 1.2.15 实测同样会踩 `jsonc-parser` 的 umd 坑，产物大小和构建时间与 esbuild 基本一致（我们这两个入口，esbuild 约 15ms / 79KB + 69KB，rolldown 约 40ms / 79KB + 70KB）。它擅长的是多入口拆包、Rollup 插件生态、生成 .d.ts，这些我们目前都用不到，所以先留在 esbuild。
+
+### VSIX 里有什么
+
+`.vscodeignore` 只留四类东西：`package.json`、`README.md`、`dist/**`、`LICENSE`（有的话）。`src/`、`out/`、`runner/`、`scripts/`、`.github/`、`.agents/`、`pnpm-workspace.yaml` 都不进包。打出来的包约 127KB、9 个文件，解包后**没有 node_modules**也能跑（已验证：从解包目录直接执行 `dist/run-single-test.mjs` 正常）。
+
+### 本地怎么打包
+
+```bash
+pnpm run build      # tsc 编译到 out/（单测用） + esbuild 打包到 dist/
+pnpm run package    # 打 VSIX 到 dist/maa-node-test-<版本>.vsix
+code --install-extension dist/maa-node-test-0.1.0.vsix
+```
+
+`pnpm run package` 会自动先跑 `vscode:prepublish`（= `pnpm run build`）。`.vsix` 和 `dist/` 都在 `.gitignore` 里。
+
+### CI 工作流
+
+| 工作流 | 触发 | 做什么 |
+| --- | --- | --- |
+| `.github/workflows/test.yml` | push / PR 到 `main` | `pnpm install --frozen-lockfile` → 类型检查 → 两个单测套件 → 试打包 VSIX → 上传 artifact |
+| `.github/workflows/release.yml` | 打 `v*` 标签 | 核对标签与 `package.json` 版本一致 → 类型检查 + 单测 → 发布到 VS Marketplace → （可选）Open VSX → 建 GitHub Release 并附 vsix |
+
+需要的 secret：
+
+| secret | 用途 | 不给会怎样 |
+| --- | --- | --- |
+| `VS_MARKETPLACE_TOKEN` | 发布到 Visual Studio Marketplace 的 PAT（要带 Marketplace 的 Manage 权限，且账号能访问 `MaaEnd` 这个 publisher） | 发布那一步直接失败 |
+| `OPEN_VSX_TOKEN` | 发布到 Open VSX（VSCodium 用户） | 那一步自动跳过 |
+
+### 发版步骤
+
+```bash
+pnpm version patch    # 或 minor / major：改版本号并打 v0.1.1 这样的标签
+git push --follow-tags
+```
+
+标签必须是 `v` 开头并和 `package.json` 的版本号一致，否则 release 工作流会在核对那一步停下（防止把错的版本发出去）。
+
+### pnpm 的构建脚本白名单
+
+pnpm 12 把「允许哪些依赖在安装时跑脚本」放在 `pnpm-workspace.yaml` 的 `allowBuilds` 里（`package.json` 的 `pnpm` 字段已经无效）。当前配置：`esbuild: true`（它要装二进制）、`@vscode/vsce-sign: false`（只在签名发布时用，我们不用）。不加这个的话 CI 的 `pnpm install` 会以 `ERR_PNPM_IGNORED_BUILDS` 失败。

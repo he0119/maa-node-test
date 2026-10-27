@@ -1,40 +1,59 @@
 {
-    "folders": [
-        {
-            "name": "MaaEnd",
-            "path": "../MaaEnd"
-        },
-        {
-            "name": "maa-node-test",
-            "path": "."
-        }
-    ],
-    "tasks": {
-        "version": "2.0.0",
-        "tasks": [
-            {
-                "label": "compile",
-                "type": "shell",
-                "command": "pnpm run compile",
-                "options": {
-                    "cwd": "${workspaceFolder:maa-node-test}"
-                },
-                "group": "build",
-                "problemMatcher": "$tsc"
-            }
-        ]
+  "folders": [
+    {
+      "name": "MaaEnd",
+      "path": "../MaaEnd"
     },
-    "launch": {
-        "version": "0.2.0",
-        "configurations": [
-            {
-                "name": "调试插件（调试窗口以 MaaEnd 为工作区）",
-                "type": "extensionHost",
-                "request": "launch",
-                "args": ["--extensionDevelopmentPath=${workspaceFolder:maa-node-test}", "${workspaceFolder:MaaEnd}"],
-                "outFiles": ["${workspaceFolder:maa-node-test}/out/**/*.js"],
-                "preLaunchTask": "compile"
-            }
-        ]
+    {
+      "name": "maa-node-test",
+      "path": "."
     }
+  ],
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "build",
+        "type": "shell",
+        "command": "pnpm run build",
+        "options": {
+          "cwd": "${workspaceFolder:maa-node-test}"
+        },
+        "group": {
+          "kind": "build",
+          "isDefault": true
+        },
+        "problemMatcher": "$tsc"
+      },
+      {
+        "label": "watch:bundle",
+        "type": "shell",
+        "command": "pnpm run watch:bundle",
+        "options": {
+          "cwd": "${workspaceFolder:maa-node-test}"
+        },
+        "isBackground": true,
+        "problemMatcher": []
+      }
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "调试插件（调试窗口以 MaaEnd 为工作区）",
+        "type": "extensionHost",
+        "request": "launch",
+        "args": [
+          "--extensionDevelopmentPath=${workspaceFolder:maa-node-test}",
+          "${workspaceFolder:MaaEnd}"
+        ],
+        "outFiles": [
+          "${workspaceFolder:maa-node-test}/out/**/*.js",
+          "${workspaceFolder:maa-node-test}/dist/**/*.js"
+        ],
+        "preLaunchTask": "build"
+      }
+    ]
+  }
 }

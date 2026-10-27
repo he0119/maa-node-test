@@ -5,13 +5,28 @@
     "publisher": "MaaEnd",
     "version": "0.1.0",
     "private": true,
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/he0119/maa-node-test.git"
+    },
+    "keywords": [
+        "maa",
+        "maafw",
+        "maaend",
+        "node test",
+        "测试"
+    ],
+    "galleryBanner": {
+        "color": "#1f2430",
+        "theme": "dark"
+    },
     "categories": [
         "Testing"
     ],
     "engines": {
         "vscode": "^1.85.0"
     },
-    "main": "./out/extension.js",
+    "main": "./dist/extension.js",
     "activationEvents": [
         "workspaceContains:**/maatools.config.mts",
         "onLanguage:json",
@@ -65,16 +80,21 @@
         "compile": "tsc -p .",
         "check": "tsc -p . --noEmit",
         "watch": "tsc -p . --watch",
+        "bundle": "node scripts/bundle.mjs",
+        "build": "pnpm run compile && pnpm run bundle",
         "test": "node --test \"out/core/*.test.js\"",
         "test:runner": "node --test \"runner/lib/*.test.mjs\"",
-        "test:all": "pnpm run compile && pnpm test && pnpm run test:runner"
-    },
-    "dependencies": {
-        "jsonc-parser": "^3.3.1"
+        "test:all": "pnpm run build && pnpm test && pnpm run test:runner",
+        "vscode:prepublish": "pnpm run build",
+        "package": "vsce package --out dist",
+        "watch:bundle": "node scripts/bundle.mjs --watch"
     },
     "devDependencies": {
         "@types/node": "^22.18.0",
         "@types/vscode": "^1.85.0",
+        "@vscode/vsce": "^4.0.0",
+        "esbuild": "^0.28.2",
+        "jsonc-parser": "^3.3.1",
         "typescript": "5.9.3"
     }
 }

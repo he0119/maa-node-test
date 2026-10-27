@@ -1,0 +1,28 @@
+# 发布 VSIX 时排除的东西：只带「运行时要用的」。
+#
+# 进包的只有：package.json、README.md、LICENSE（若有）、dist/**（esbuild 打包产物）。
+# dist/extension.js 和 dist/run-single-test.mjs 已经把 jsonc-parser 打进去了，
+# 所以包里不需要 node_modules，packaged 后的扩展也不依赖工作区的 node_modules。
+
+# 源码与构建脚本
+src/**
+**/*.ts
+runner/**
+scripts/**
+tsconfig.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
+# 编译器产物（只发 dist/）
+out/**
+
+# 仓库里的开发设施
+.vscode/**
+.github/**
+.agents/**
+AGENTS.md
+*.code-workspace
+.markdownlint.json
+.markdownlintignore
+.prettierignore
+.gitignore

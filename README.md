@@ -19,9 +19,20 @@
 
 插件不改 MaaEnd 仓库，也不往仓库里加文件。
 
-## 装（开发态）
+## 装
 
-现在还没发布到市场，用调试方式跑：
+### 正式版
+
+还没发布到市场。发布之后可以：
+
+- 在 VS Code 的扩展面板里搜「Maa 节点测试」安装；
+- 或者从 GitHub Release 下载 `.vsix`，用 `code --install-extension maa-node-test-<版本>.vsix` 安装。
+
+维护者发一版：`pnpm version patch` 然后 `git push --follow-tags`，标签会触发 `.github/workflows/release.yml` 自动发布（细节见 [reference.md](.agents/skills/maa-node-test-dev/reference.md#构建与发布)）。
+
+### 开发态
+
+想改代码或者还没发版时，用调试方式跑：
 
 ```bash
 cd ~/dev/maa-node-test
@@ -163,7 +174,7 @@ pnpm run compile
 
 ## 想改这个插件
 
-- 常用命令：`pnpm run check`（类型检查）、`pnpm run compile`、`pnpm test`（扩展单测）、`pnpm run test:runner`（runner 单测）、`pnpm run test:all`；
+- 常用命令：`pnpm run check`（类型检查）、`pnpm run build`（编译 + 打包到 `dist/`）、`pnpm test`（扩展单测）、`pnpm run test:runner`（runner 单测）、`pnpm run test:all`、`pnpm run package`（打 VSIX）；
 - [AGENTS.md](AGENTS.md)：项目边界、代码地图、硬约束；
 - [.agents/skills/maa-node-test-dev/SKILL.md](.agents/skills/maa-node-test-dev/SKILL.md)：改这个插件时的操作手册；同目录 [reference.md](.agents/skills/maa-node-test-dev/reference.md) 是命令行契约、退出码映射、内部实现细节；
 - [.agents/notes/](.agents/notes/README.md)：设计取舍记录（为什么自带 runner、为什么独立成仓、为什么合成一批跑）。

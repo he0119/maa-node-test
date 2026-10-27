@@ -1,0 +1,77 @@
+name: Release
+
+# 打一个 v 开头的标签就发一版，例如：
+#   pnpm version patch        # 改 package.json 版本号并打 tag
+#   git push --follow-tags
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # 建 GitHub Release 需要写权限
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 没配 Open VSX 的 token 时，那一步会自动跳过
+    env:
+      OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: 装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 核对标签和 package.json 的版本号
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::标签是 $GITHUB_REF_NAME，但 package.json 里写的是 $version，两边必须一致"
+            exit 1
+          fi
+          echo "准备发布 $version"
+
+      - name: 类型检查
+        run: pnpm run check
+
+      - name: 单测（扩展纯函数 + runner）
+        run: pnpm run test:all
+
+      # 这一步会自己跑 vsce package（顺带触发 vscode:prepublish → 编译 + esbuild 打包）
+      # 然后发布到市场，产物路径从 outputs.vsixPath 拿
+      - name: 发布到 Visual Studio Marketplace
+        id: marketplace
+        uses: HaaLeo/publish-vscode-extension@v2
+        with:
+          pat: ${{ secrets.VS_MARKETPLACE_TOKEN }}
+          registryUrl: https://marketplace.visualstudio.com
+
+      # 可选：VSCodium / Open VSX 用户从这里装。没配 token 就跳过
+      - name: 发布到 Open VSX
+        if: ${{ env.OPEN_VSX_TOKEN != '' }}
+        uses: HaaLeo/publish-vscode-extension@v2
+        with:
+          pat: ${{ secrets.OPEN_VSX_TOKEN }}
+          registryUrl: https://open-vsx.org
+          extensionFile: ${{ steps.marketplace.outputs.vsixPath }}
+          skipDuplicate: true
+
+      - name: 建 GitHub Release 并附上 vsix
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.marketplace.outputs.vsixPath }}
+          generate_release_notes: true

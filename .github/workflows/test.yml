@@ -1,0 +1,49 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: 装 Node（插件要求 22 及以上）
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 类型检查
+        run: pnpm run check
+
+      - name: 单测（扩展纯函数 + runner）
+        run: pnpm run test:all
+
+      # 打包本身也是一项检查：.vscodeignore 写错、dist/ 没生成都会在这里暴露
+      - name: 试打包 VSIX
+        run: pnpm run package
+
+      - name: 上传 VSIX（方便手动装一下试试）
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: dist/*.vsix
+          retention-days: 7
