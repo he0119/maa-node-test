@@ -336,13 +336,15 @@ export function formatCaseFailure(info) {
         if (!missingPlatforms.includes(item.platform)) continue;
         lines.push(`截图不存在 \`${item.path}\`，这条用例在这个平台上被跳过`);
     }
+    // 「没验证到」的结论紧跟在缺图明细后面，平台放在句首：标题、失败明细、通过行都是
+    // 「平台 + 事实」的顺序，这里反过来写（「这条用例…缺图的平台是 X」）读起来像补一句废话。
+    // 位置也在「通过」行之前 —— 先把问题说完，再报好消息。
+    if (failedPlatforms.length === 0 && info.missing.length > 0) {
+        lines.push(`${missingPlatforms.join("、")}：缺图，这条用例没有真正验证到`);
+    }
 
     if (passedPlatforms.length > 0) lines.push(`通过：${passedPlatforms.join("、")}`);
     else if (failedPlatforms.length > 0) lines.push(`所有能跑的平台都失败：${failedPlatforms.join("、")}`);
-
-    if (failedPlatforms.length === 0 && info.missing.length > 0) {
-        lines.push(`这条用例没有真正验证：缺图的平台是 ${missingPlatforms.join("、")}`);
-    }
 
     return {title, lines};
 }
