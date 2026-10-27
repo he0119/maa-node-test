@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import {parseTestDocument} from "../core/document";
 import {parseHitEntries, truncateInlayLabel} from "../core/hits";
 import {describePipelineNode} from "../core/pipeline";
 import type {PipelineNode} from "../core/pipeline";
@@ -21,13 +22,16 @@ export class NodeTestInlayHintsProvider implements vscode.InlayHintsProvider {
         const index = this.indexOf();
         if (!index) return [];
 
+        const text = document.getText();
+        const controllers = parseTestDocument(text).configs.controller;
+
         const hints: vscode.InlayHint[] = [];
-        for (const entry of parseHitEntries(document.getText())) {
+        for (const entry of parseHitEntries(text)) {
             // 提示贴在字符串末尾，只处理当前可见范围内那几条（一屏之外的不必算）
             const position = document.positionAt(entry.offset + entry.length);
             if (!range.contains(position)) continue;
 
-            const info = index.nodeInfo(entry.name);
+            const info = index.nodeInfo(entry.name, controllers);
             if (!info) continue;
 
             const summary = describePipelineNode(info);

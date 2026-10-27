@@ -26,6 +26,7 @@
 | `core/repoIndex.ts` | 补全的数据来源：loader 映射、测试集截图名、pipeline 节点索引，各自带缓存 |
 | `core/hits.ts` | 解析测试文件里 `hits` 的每一项（字符串和 `{node: ...}` 两种写法）及其位置，供内联提示用；提示文案的截断也在这里 |
 | `core/pipeline.ts` | 解析 pipeline 文件里每个节点的位置与说明（`desc` / `focus` / 识别 / 动作），以及 `hits` 路径判断 |
+| `core/resources.ts` | 读 `interface.json` 的控制器 → 资源目录映射，算出某份测试文件该扫哪些资源 |
 | `providers/inlayHints.ts` | `hits` 节点名后面的注释（`desc`），点击跳定义 |
 | `providers/definition.ts` | `hits` 里的节点名 Ctrl+Click / F12 跳到 pipeline 里的定义 |
 | `core/testExplorer.ts` | 把测试文件翻成测试面板的树描述（id、label、description、range）；`folderSegments()` 决定目录分组层级 |
@@ -203,7 +204,7 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 
 ## 补全
 
-- **数据来源全是仓库自己的**：`controller` / `resource` 取自 `tests/scripts/loader.mts` 的映射表（不写死名字，`Win32-Front` 这种别名也会出现，detail 里标出它对应哪个截图目录）；`image` 取测试集里真实存在的 png，按本文件 `configs.controller` 换算成目录后收窄；`hits`（含 `{node: ...}` 写法）取 `assets/resource/pipeline/**` 的顶层键。
+- **数据来源全是仓库自己的**：`controller` / `resource` 取自 `tests/scripts/loader.mts` 的映射表（不写死名字，`Win32-Front` 这种别名也会出现，detail 里标出它对应哪个截图目录）；`image` 取测试集里真实存在的 png，按本文件 `configs.controller` 换算成目录后收窄；`hits`（含 `{node: ...}` 写法）取 pipeline 里的节点名，**只算本文件声明的控制器会加载的资源目录**（见下一节）。
 - **判断光标在哪一层用 `jsonc-parser` 的 `getLocation`**，别自己扫文本。有个坑：**在写键时它会把「已经敲进去的半截键名」当成最后一个路径段**（`{"configs": {` → `['configs','']`），所以 `completionContextAt()` 在 `atKey` 时 `path.pop()` 一次，路径才是「光标所在的那个对象」。
 - **拿不准就不给候选**：`name`、`imageRoot`、`box` 这些没有可枚举取值的字段返回空数组，宁可不弹也别给错的值。
 - **插入文本看上下文**：光标已经在字符串里（`inString`）就只插内容，否则连引号一起插。
@@ -211,6 +212,15 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 - **节点注释照参考实现（maa-support-extension）的做法**：补全候选只带节点名，`resolveCompletionItem` 展开时才去查注释（`documentation = desc + Reco/Act + 定义位置`），不给 6082 个候选预先拼字符串。
 - **别名一致性**：`loaderMaps.resolveControllerDir()` 是唯一的换名入口，缺图检查和悬浮也走它 —— 否则 `Win32-Front` 会被误报成「测试集里没有这个平台的目录」。
 - **loader 解析用正则**：只取两个对象字面量的键值，注释掉的条目要剔除（loader 里常用注释占位）。别为了 4KB 文件引入 TypeScript 解析器。
+
+## 节点名扫哪些目录
+
+- **只扫本文件声明的控制器会加载的资源**：`assets/interface.json` 的 `controller[].attach_resource_path` 给出了映射（MaaEnd 里 `ADB` → `./resource_adb`，`CloudADB` → `./resource_adb` + `./resource_cloud_adb`）。基础资源 `assets/resource` 总是要扫；
+- 例：测试文件声明 `["Win32"]` 时候选 6082 个节点（只有 `resource` 那 421 个文件），声明 `["ADB"]` 时 6098 个（多出 `resource_adb` 的 118 个文件）；`AutoCollectClick` 在 ADB 下有两处定义（基础 + `resource_adb` 覆盖），在 Win32 下只有一处；
+- **声明了但映射里查不到的控制器**（`Win32` 在 interface.json 里叫 `Win32-Front`）只加基础资源，不会瞎猜；
+- **没有 `interface.json`** 时退回「扫 `assets` 下所有 `pipeline` 目录」，别让补全悄悄变空；
+- 平台覆盖目录里的节点大多是在改别的平台的行为，混进来既吵又容易选错 —— 这也是不扫全部的原因；
+- 缓存分三层：文件清单按「控制器组合」缓存、资源目录清单（walk `assets` 找 `pipeline`）缓存 10 秒、单文件解析结果按 mtime 复用。实测基础资源首次 346ms，换一个控制器组合再建只要 5~12ms（只解析新增的那几十个文件）。
 
 ## 节点注释与跳转
 

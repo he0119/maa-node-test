@@ -32,7 +32,7 @@ export class NodeTestCompletionProvider implements vscode.CompletionItemProvider
         const candidates = candidatesFor(context, index, declared);
         if (candidates.length === 0) return undefined;
 
-        return candidates.map((candidate) => toCompletionItem(candidate, context, index));
+        return candidates.map((candidate) => toCompletionItem(candidate, context, index, declared));
     }
 
     /** 展开候选时才把节点注释填进去（照参考实现的做法） */
@@ -43,12 +43,17 @@ export class NodeTestCompletionProvider implements vscode.CompletionItemProvider
     }
 }
 
-function toCompletionItem(candidate: Candidate, context: CompletionContext, index: RepoIndex): vscode.CompletionItem {
+function toCompletionItem(
+    candidate: Candidate,
+    context: CompletionContext,
+    index: RepoIndex,
+    declared: readonly string[],
+): vscode.CompletionItem {
     const item: DetailItem = new vscode.CompletionItem(candidate.label, kindOf(candidate));
     item.insertText = insertTextOf(candidate, context);
     if (candidate.detail) item.detail = candidate.detail;
     // 节点候选：注释 + Reco/Act + 定义位置，展开候选时才查
-    if (candidate.nodeName) item.fillDetail = () => index.describeNode(candidate.nodeName ?? "");
+    if (candidate.nodeName) item.fillDetail = () => index.describeNode(candidate.nodeName ?? "", declared);
     return item;
 }
 

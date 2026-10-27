@@ -39,7 +39,7 @@ export class NodeTestDefinitionProvider implements vscode.DefinitionProvider {
         if (!node || node.type !== "string" || typeof node.value !== "string") return undefined;
         if (!isHitsEntryPath(getNodePath(node))) return undefined;
 
-        const infos = index.nodeInfos(node.value);
+        const infos = index.nodeInfos(node.value, parseTestDocument(text).configs.controller);
         if (infos.length === 0) return undefined;
 
         // 目标文件可能没被打开过，位置要按它自己的文本算，不能拿当前文档的 positionAt

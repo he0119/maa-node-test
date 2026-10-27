@@ -26,8 +26,8 @@ export interface RepoData {
     resources: readonly LoaderEntry[];
     /** 截图文件名；传入本文件声明的 controller，能收窄就收窄 */
     images: (controllers: readonly string[]) => readonly string[];
-    /** pipeline 节点名 */
-    nodes: () => readonly string[];
+    /** pipeline 节点名；传本文件声明的 controller 后只算它们会加载的资源目录 */
+    nodes: (controllers: readonly string[]) => readonly string[];
 }
 
 export type CandidateKind = "key" | "controller" | "resource" | "image" | "node";
@@ -138,7 +138,7 @@ export function candidatesFor(
 
     // hits 里的节点名：既可以写成字符串，也可以写成 { node: "..." }
     if (fieldPath[0] === "cases" && fieldPath[2] === "hits" && (field === "hits" || field === "node")) {
-        return data.nodes().map((name) => ({label: name, kind: "node" as const, nodeName: name}));
+        return data.nodes(declared).map((name) => ({label: name, kind: "node" as const, nodeName: name}));
     }
 
     return [];

@@ -25,7 +25,7 @@ export class NodeTestHoverProvider implements vscode.HoverProvider {
         const offset = document.offsetAt(position);
         const field = findImageFieldAt(parsed, offset);
         // 不是 image 字段就看看是不是 hits 里的节点名
-        if (!field) return nodeHover(document, offset, this.indexOf());
+        if (!field) return nodeHover(document, offset, this.indexOf(), parsed.configs.controller);
 
         const workspace = resolveNodeTestWorkspace();
         if (!workspace) {
@@ -87,6 +87,7 @@ async function nodeHover(
     document: vscode.TextDocument,
     offset: number,
     index: RepoIndex | null,
+    controllers: readonly string[],
 ): Promise<vscode.Hover | null> {
     if (!index) return null;
 
@@ -98,7 +99,7 @@ async function nodeHover(
     const path = getNodePath(node);
     if (!isHitsEntryPath(path)) return null;
 
-    const info = index.nodeInfo(node.value);
+    const info = index.nodeInfo(node.value, controllers);
     if (!info) {
         const missing = new vscode.MarkdownString(
             `**${node.value}** · pipeline 里没有这个节点\n\n检查节点名有没有写错，或者是哪个 pipeline 文件还没被加载。`,
