@@ -16,7 +16,7 @@ import {DEFAULT_CONFIG, USAGE, UsageError, parseArgs} from "./lib/args.mjs";
 import {caseKey, hitNodeNames} from "./lib/case-key.mjs";
 import {filterGroups, groupLabel, groupName} from "./lib/filter.mjs";
 import {countImages, scanImages} from "./lib/images.mjs";
-import {MaaToolsLoadError, importMaaTools} from "./lib/maa-tools.mjs";
+import {MaaToolsLoadError, describeMaaToolsSource, importMaaTools} from "./lib/maa-tools.mjs";
 import {displayPath, resolveFromWorkspace, toPosix} from "./lib/paths.mjs";
 import {readPngSize} from "./lib/png.mjs";
 import {printResult} from "./lib/report.mjs";
@@ -84,8 +84,9 @@ async function run() {
     }
 
     let maaTools;
+    let maaToolsSource;
     try {
-        maaTools = await importMaaTools(workspace);
+        ({module: maaTools, source: maaToolsSource} = await importMaaTools(workspace));
     } catch (error) {
         if (error instanceof MaaToolsLoadError) throw new FatalError(error.message);
         throw error;
@@ -144,6 +145,7 @@ async function run() {
             : `用例下标 ${args.caseIndex}（第 ${args.caseIndex + 1} 个），共 ${testFile.cases.length} 个`;
     console.log(`运行 ${relativeFile}（${caseText}）`);
     console.log(`配置 ${displayPath(workspace, configPath)}`);
+    console.log(`库：${describeMaaToolsSource(maaToolsSource, workspace)}`);
 
     if (groups.length === 0) {
         console.error(

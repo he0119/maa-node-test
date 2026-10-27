@@ -34,7 +34,30 @@
 | `lib/png.mjs` | 读 PNG 头拿宽高 |
 | `lib/paths.mjs` | 相对仓库根解析路径、日志里显示相对路径 |
 | `lib/report.mjs` | 退出码映射与 `RESULT:` 行 |
-| `lib/maa-tools.mjs` | 动态 import `@nekosu/maa-tools`，失败退回 `<workspace>/node_modules/...` |
+| `lib/maa-tools.mjs` | 加载 `@nekosu/maa-tools`：**优先**用仓库里的那份，包名解析只作兜底；返回本次实际加载的来源与版本 |
+
+## 依赖策略：为什么不自带 maa-tools
+
+`@nekosu/maa-tools` **故意没有写进本仓库的 `package.json`**。插件和 runner 直接调它的函数（`loadConfig`、`runTest`），但加载的是**被测试仓库自己装的那一份**：
+
+```text
+<workspace>/node_modules/@nekosu/maa-tools/dist/index.mjs   ← 优先
+@nekosu/maa-tools（按包名解析）                              ← 兜底，仅用于脚本被搬到别处做实验
+```
+
+理由：
+
+1. **版本一致才能结论一致**。`maatools.config.mts` 是照仓库那份 maa-tools 写的（类型、`test.cases` 的返回结构、组名拼法、`imageRoot` 都由它决定），CI 里的 `pnpm test` 跑的也是那份。插件自带副本就可能出现「插件说通过、CI 说失败」。
+2. **它决定 MaaFW 版本**。`setupMaa` 用 `maaVersion: 'latest'` + `~/.maa-tools` 缓存，两份副本可能解析出不同的 MaaFW，识别结果就不可比。
+3. **省一份重复依赖**。它拖着 jiti / workerpool / maa-version-manager / maa-pipeline-manager 等一串包。
+
+代价：仓库依赖没装好时插件跑不起来（README 的前置条件里写了）。所以每次运行都会在日志第二行打出实际用的是哪一份、什么版本：
+
+```text
+库：@nekosu/maa-tools 1.1.2（用仓库里的副本：node_modules/@nekosu/maa-tools/dist/index.mjs）
+```
+
+排查「本地和 CI 不一致」时先看这一行。
 
 ## runner 命令行契约
 

@@ -14,6 +14,7 @@ Status: implemented
 - 插件独立成一个仓库 `~/dev/maa-node-test`，与 MaaEnd 仓库**平级**，不往里加任何文件；对 MaaEnd 的假设只有三条：根上有 `maatools.config.mts`、截图在 `tests/MaaEndTestset` 下按 `<控制器>/<资源服>` 分目录、测试文件叫 `tests/**/test_*.json`。
 - 跑插件那个窗口的**工作区必须是 MaaEnd**。提供三种调试方式，首选多根工作区文件 `maa-node-test.code-workspace`（`MaaEnd` 排第一当主工作区 + 插件源码第二个文件夹），它带 `compile` 前置任务，按 `F5` 就直接得到「工作区是 MaaEnd、插件已加载」的调试窗口。
 - 另外两条路都保留：只开插件目录按 `F5`（`.vscode/launch.json` 里末位参数固定传 `../MaaEnd`）；或在 MaaEnd 窗口里加一段本地 launch 片段（只做本机配置，不进仓库）。
+- 依赖策略同理：**用 MaaEnd 那份 `@nekosu/maa-tools`，不自己装一份**。插件加载它时优先走 `<workspace>/node_modules/@nekosu/maa-tools/dist/index.mjs`，按包名解析只作兜底；每次运行把实际版本打进日志。
 
 ## Alternatives considered
 
@@ -29,5 +30,6 @@ Status: implemented
 
 - MaaEnd 仓库零侵入：`git status` 永远是干净的，插件的改动不会以任何形式出现在主仓库的 PR 里；
 - 代价是路径约定固定：插件目录默认在 `~/dev/maa-node-test`、仓库在 `~/dev/MaaEnd`，换机器要改 `.code-workspace` / `launch.json` 里的路径（已尽量用 `${userHome}` / `${workspaceFolder}` 表达）；
-- 依赖不复用：插件自带 `node_modules`（`jsonc-parser` + `typescript` + `@types/*`），`@nekosu/maa-tools` 仍然从 MaaEnd 仓库的 `node_modules` 解析（runner 里做了「包名 → 显式路径」两级兜底），所以 MaaEnd 那份依赖没装好时插件跑不起来 —— 这个前提被写进了 README 的前置条件；
+- 依赖只自带「构建期/纯工具」的那几个（`jsonc-parser`、`typescript`、`@types/*`）。**`@nekosu/maa-tools` 故意不声明依赖**：运行时优先加载 `<workspace>/node_modules` 里那份，包名解析只作兜底，并在日志里打出实际版本 —— 理由见下一条；
+- 代价是 MaaEnd 那份依赖没装好时插件跑不起来，这个前提写进了 README 的前置条件；换来的是「插件跑出来的结果」和「CI 跑出来的结果」用的是同一套 maa-tools 与 MaaFW 解析逻辑，不会出现两边结论不一致却查不出原因的情况；
 - 格式化与 Markdown 检查沿用 MaaEnd 仓库装好的 prettier / markdownlint，避免两处配置漂移；`maa-node-test.code-workspace` 因为要当纯 JSON 读，被排除在 prettier 之外。

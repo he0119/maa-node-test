@@ -134,6 +134,16 @@ pnpm run compile
 4. 自己做**截图存在性预检**：`maa-tools` 遇到不存在的截图只打印 `not exists, ignored` 然后跳过，跳过即视为通过，会把「一张图都没有」误判成通过；所以一张都不存在时直接判前置错误；
 5. 调 `runTest(cfg)`，把结果翻译成固定接口：最后一行 `RESULT: pass|fail|error|empty` + 退出码。
 
+### 为什么不用插件自己的 maa-tools
+
+插件直接调用 `@nekosu/maa-tools` 的 `loadConfig` / `runTest`，但**不把它装进自己的依赖里**：运行时优先加载被测试仓库 `node_modules` 里那份，按包名解析只作兜底。原因是 `maatools.config.mts` 是照仓库那份版本写的，CI 的 `pnpm test` 跑的也是那份 —— 两边版本不一致，就会出现「插件说通过、CI 说失败」这种最难查的问题。
+
+每次运行的第二行日志会写明实际用的是哪一份、什么版本：
+
+```text
+库：@nekosu/maa-tools 1.1.2（用仓库里的副本：node_modules/@nekosu/maa-tools/dist/index.mjs）
+```
+
 退出码就是插件和脚本之间的契约：
 
 | 退出码 | 含义 | 测试面板里的表现 |
