@@ -46,7 +46,12 @@ Maa 节点测试的 VS Code 插件，基于 `maa-tools` 的节点测试机制（
 - 在 VS Code 的扩展面板里搜「Maa 节点测试」安装；
 - 或者从 GitHub Release 下载 `.vsix`，用 `code --install-extension maa-node-test-<版本>.vsix` 安装。
 
-维护者发一版：`pnpm version patch` 然后 `git push --follow-tags`，标签会触发 `.github/workflows/release.yml` 自动发布（细节见 [reference.md](.agents/skills/maa-node-test-dev/reference.md#构建与发布)）。
+维护者发一版分两步（`main` 有分支保护，版本号改动也得走 PR）：
+
+1. `pnpm version patch --no-git-tag-version` 改版本号，提 PR 合进 `main`；
+2. 到仓库的 Actions 页面手动触发 `Release` 工作流（选 `main` 分支）。它读 `package.json` 的版本号，打 `v<版本>` 标签、跑测试、打包、建 GitHub Release 并挂上 `.vsix`，然后发布到市场（细节见 [reference.md](.agents/skills/maa-node-test-dev/reference.md#构建与发布)）。
+
+标签由工作流自己打，不需要在本地 `git tag`；手动推标签不会再触发发布。
 
 ### 开发态
 

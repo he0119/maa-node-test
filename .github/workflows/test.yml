@@ -17,16 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 装 pnpm
-        uses: pnpm/action-setup@v4
+      # 一步装好 pnpm 和 Node（插件要求 22 及以上），并缓存 pnpm store
+      - name: 装 pnpm 和 Node
+        uses: pnpm/setup@v3
         with:
           version: 12
-
-      - name: 装 Node（插件要求 22 及以上）
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
+          runtime: node@22
+          cache: true
 
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
