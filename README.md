@@ -214,3 +214,10 @@ pnpm run compile
 - [AGENTS.md](AGENTS.md)：项目边界、代码地图、硬约束；
 - [.agents/skills/maa-node-test-dev/SKILL.md](.agents/skills/maa-node-test-dev/SKILL.md)：改这个插件时的操作手册；同目录 [reference.md](.agents/skills/maa-node-test-dev/reference.md) 是命令行契约、退出码映射、内部实现细节；
 - [.agents/notes/](.agents/notes/README.md)：设计取舍记录（为什么自带 runner、为什么独立成仓、为什么合成一批跑）。
+
+## 致谢
+
+- [neko-para/maa-support-extension](https://github.com/neko-para/maa-support-extension)：本插件的参考实现，扩展的组织方式、悬浮与补全里显示节点注释的写法都来自它；它的 `@nekosu/maa-tools` 还直接提供了节点测试的执行能力（`loadConfig` / `runTest` / `loadAllTestCases`），插件自己不实现识别与比对。
+- [MaaXYZ/MaaFramework](https://github.com/MaaXYZ/MaaFramework)：节点（Pipeline）协议与识别算法，节点测试跑的就是它。
+- [MaaEnd/MaaEnd](https://github.com/MaaEnd/MaaEnd)：节点测试的用例格式、`tests/MaaEndTestset` 的测试集目录约定、`tests/scripts/loader.mts` 里的控制器与资源映射；插件的默认值和图标都取自这个仓库。
+- [he0119/vscode-bangumiplan](https://github.com/he0119/vscode-bangumiplan)：发布流程的参考，测试/发布两个 workflow 的结构（vsce 发布、Open VSX、GitHub Release 附件）照它配的。
