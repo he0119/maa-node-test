@@ -36,6 +36,19 @@ test("解析用例结论行：拿到短标题和明细列表，Windows 反斜杠
     assert.match(info.detail[0], /节点 `X` 这张图上没识别到该节点/);
 });
 
+test("缺图跳过的用例结论行也能解析（verdict 是 skipped，不是 error）", () => {
+    const verdicts = new Map<string, CaseVerdict>();
+    // 这行是 runner 真实输出的形状：tests/DeliveryJobs/test_quick_transfer.json 第 3 条，ADB 缺图
+    collectCaseVerdict(
+        'RESULT-CASE: {"file":"tests/DeliveryJobs/test_quick_transfer.json","case":2,"verdict":"skipped","title":"ADB-官服 没验证到","detail":["截图不存在 `/repo/x/ADB/Official_CN/a.png`，这条用例在这个平台上被跳过","通过：Win32-官服"]}',
+        verdicts,
+    );
+    const info = verdicts.get(caseKeyOf("tests/DeliveryJobs/test_quick_transfer.json", 2));
+    assert.ok(info);
+    assert.equal(info.verdict, "skipped");
+    assert.equal(info.title, "ADB-官服 没验证到");
+});
+
 test("坏掉的用例结论行被忽略，不影响文件级结论", () => {
     const verdicts = new Map<string, CaseVerdict>();
     collectCaseVerdict("RESULT-CASE: 不是 json", verdicts);
@@ -122,7 +135,7 @@ test("Markdown：粗体短标题在前，空一行后是列表", () => {
 });
 
 const missingImageCase: CaseVerdict = {
-    verdict: "error",
+    verdict: "skipped",
     title: "CloudADB-官服 没验证到",
     detail: ["截图不存在 `/repo/x/CloudADB/a.png`，这条用例在这个平台上被跳过"],
 };
@@ -142,23 +155,49 @@ test("标记计划：文件通过且没有逐用例信息时，全部标通过",
     );
 });
 
-test("标记计划：文件通过但有用例缺图没验证到时，文件不能标通过", () => {
+test("标记计划：缺图跳过的用例标跳过，文件仍算通过，但要在提示里点出来", () => {
     const marking = planFileMarking("tests/a.json", "pass", [
         {caseIndex: 0},
         {caseIndex: 1, info: missingImageCase},
     ]);
 
-    // 这是关键：断言没失败 ≠ 都验证过了
-    assert.equal(marking.file.verdict, "error");
-    assert.equal(marking.file.text.title, "1 条用例没有验证到");
+    // 缺图不算失败：文件通过、用例标跳过，但「哪条没验证到」要留在文件提示里
+    assert.equal(marking.file.verdict, "pass");
+    assert.equal(marking.file.text.title, "通过");
     assert.deepEqual(marking.file.text.detail, [
+        "1 条用例没有验证到（缺图跳过，不算失败，补图后重跑即可）",
         "第 2 个用例 · CloudADB-官服 没验证到",
-        "    截图不存在 `/repo/x/CloudADB/a.png`，这条用例在这个平台上被跳过",
     ]);
 
     assert.equal(marking.cases[0].verdict, "pass");
-    assert.equal(marking.cases[1].verdict, "error");
+    assert.equal(marking.cases[1].verdict, "skipped");
     assert.equal(marking.cases[1].text.title, "CloudADB-官服 没验证到");
+});
+
+test("标记计划：全是跳过（整批缺图）时文件也别标红", () => {
+    const marking = planFileMarking("tests/a.json", "pass", [
+        {caseIndex: 0, info: missingImageCase},
+        {caseIndex: 1, info: missingImageCase},
+    ]);
+    assert.equal(marking.file.verdict, "pass");
+    assert.equal(marking.file.text.detail[0], "2 条用例没有验证到（缺图跳过，不算失败，补图后重跑即可）");
+    assert.deepEqual(
+        marking.cases.map((entry) => entry.verdict),
+        [
+            "skipped",
+            "skipped",
+        ],
+    );
+});
+
+test("标记计划：跳过和真失败混在一起时，文件按失败标，跳过的那条仍是跳过", () => {
+    const marking = planFileMarking("tests/a.json", "fail", [
+        {caseIndex: 0, info: missingImageCase},
+        {caseIndex: 1, info: {verdict: "fail", title: "CloudADB-官服 失败", detail: ["节点 `X` 没识别到"]}},
+    ]);
+    assert.equal(marking.file.verdict, "fail");
+    assert.equal(marking.cases[0].verdict, "skipped");
+    assert.equal(marking.cases[1].verdict, "fail");
 });
 
 test("标记计划：文件通过但有用例失败时（理论上不该出现）按失败标", () => {

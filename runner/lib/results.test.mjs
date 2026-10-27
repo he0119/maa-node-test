@@ -3,6 +3,7 @@ import {test} from "node:test";
 
 import {
     aggregateFileResults,
+    caseOutcome,
     classifyErrorEntry,
     formatCaseFailure,
     formatCaseResultLine,
@@ -493,8 +494,30 @@ test("缺图：某个平台缺图、别的平台通过时，说清哪边没验�
         missing: [{platform: "CloudADB-官服", image: "a.png", path: "/x/CloudADB/a.png"}],
     });
     assert.equal(text.title, "CloudADB-官服 没验证到");
-    assert.ok(text.lines.some((line) => /截图不存在/.test(line)));
-    assert.ok(text.lines.some((line) => /这条用例没有真正验证/.test(line)));
+    // 平台放句首，和标题、失败明细的顺序一致；结论排在「通过」前面，先说完问题再报好消息
+    assert.deepEqual(text.lines, [
+        "截图不存在 `/x/CloudADB/a.png`，这条用例在这个平台上被跳过",
+        "CloudADB-官服：缺图，这条用例没有真正验证到",
+        "通过：Win32-官服",
+    ]);
+});
+
+test("缺图：多个平台都缺图时，平台名一起放句首", () => {
+    const text = formatCaseFailure({
+        platforms: [
+            "Win32-官服",
+            "ADB-官服",
+            "CloudADB-官服",
+        ],
+        failures: [],
+        missing: [
+            {platform: "ADB-官服", image: "a.png", path: "/x/ADB/a.png"},
+            {platform: "CloudADB-官服", image: "a.png", path: "/x/CloudADB/a.png"},
+        ],
+    });
+    assert.equal(text.title, "ADB-官服、CloudADB-官服 没验证到");
+    assert.equal(text.lines.at(-1), "通过：Win32-官服");
+    assert.ok(text.lines.includes("ADB-官服、CloudADB-官服：缺图，这条用例没有真正验证到"));
 });
 
 test("平台覆盖：按平台统计截图数和缺图数", () => {
@@ -551,4 +574,20 @@ test("平台覆盖：声明了但没有匹配到组的 controller 会被点出�
     const summary = summarizePlatforms({groups: [win32], entries, isImageMissing: () => false});
 
     assert.deepEqual(summary.unmatched, [{file: "tests/a.json", controller: "ADB"}]);
+});
+
+test("用例结论：有失败报 fail，只有缺图报 skipped", () => {
+    assert.equal(caseOutcome({failures: [{platform: "ADB-官服", node: "X", reason: "没识别到"}], missing: []}), "fail");
+    assert.equal(
+        caseOutcome({failures: [], missing: [{platform: "ADB-官服", image: "a.png", path: "/x/a.png"}]}),
+        "skipped",
+    );
+    // 失败优先：既有失败又有缺图时仍按失败报
+    assert.equal(
+        caseOutcome({
+            failures: [{platform: "Win32-官服", node: "X", reason: "没识别到"}],
+            missing: [{platform: "ADB-官服", image: "a.png", path: "/x/a.png"}],
+        }),
+        "fail",
+    );
 });

@@ -84,7 +84,7 @@ node runner/run-single-test.mjs \
 - `--file` 可以重复：多个文件就是**批量跑**，一次进程跑完，省掉每个文件重新准备 MaaFW 的固定开销。
 - 不传 `--case`：跑目标文件里的全部用例；批量跑时不允许带 `--case`（下标含义会歧义）。
 - `--dry-run`：只解析、过滤、检查截图，打印计划；不加载 MaaFW、不执行识别。
-- stdout 是人话日志，随后是**逐用例结论** `RESULT-CASE: {json}`（只打失败和被跳过这两类）、**逐文件结论** `RESULT-FILE: <相对路径> pass|fail|error`，**最后一行固定** `RESULT: pass|fail|error|empty`；退出码与最后一行一致。
+- stdout 是人话日志，随后是**逐用例结论** `RESULT-CASE: {json}`（只打失败和缺图跳过这两类，`verdict` 分别是 `fail` / `skipped`）、**逐文件结论** `RESULT-FILE: <相对路径> pass|fail|error`，**最后一行固定** `RESULT: pass|fail|error|empty`；退出码与最后一行一致。
 - 逐用例行 `RESULT-CASE` 的载荷是 `{"file","case","verdict","title","detail":[...]}`：`title` 是面板节点上显示的那一行短标题（例如 `CloudADB-官服 失败`），`detail` 是展开后逐条列出的明细（节点、原因、截图、哪些平台通过）。用 JSON 是因为原因里带空格、逗号和反引号。
 - 逐用例原因来自 maa-tools 写的 `cfg.test.errorDetailsPath`（MaaEnd 里是 `tests/maatools/error_details.json`）：条目含 `imagePath`、`node`、`hit`、`detail.{algorithm, box}`。**只有本次运行更新过这个文件才采信**（比 mtime），否则宁可没有原因，也不张冠李戴。
 - 运行日志里有一块「平台覆盖」：每个平台涉及多少张截图、缺几张，以及声明了却没有匹配到测试组的 controller（后者多半是 controller 名字写错或 loader 没映射）。缺图必须在日志里显式出现 —— 否则「跳过即通过」会被误读成没问题。
@@ -180,7 +180,8 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 - **串行**：多个目标用一个 promise 队列逐个跑，避免同时起一堆 MaaFW。
 - **取消**：`CancellationToken` → `process.cancel()`，被取消的标 skipped。
 - **结果标记**：文件节点用 `**短标题**` + Markdown 列表（明细来自 `RESULT-CASE`）；有逐用例信息时子用例各按自己的结论标记，没被点名的按通过处理；一条逐用例信息都没有时，子用例跟随文件结论。
-- **「文件通过」不等于「每条都验证过」**：声明的平台缺图时 maa-tools 会跳过该用例并判通过，文件也就没有断言失败。所以标记规则单独抽成了 `core/testResult.ts` 的 `planFileMarking()`：只要有用例没验证到，文件节点标成 errored（标题「N 条用例没有验证到」），子用例各自标 —— 不允许「文件通过 → 子用例全绿」。
+- **缺图 = 跳过，不是失败**：声明的平台缺图时 maa-tools 会跳过该用例并判通过，文件也就没有断言失败。标记规则抽成 `core/testResult.ts` 的 `planFileMarking()`：这类用例在面板里标成 `skipped`（灰的），文件仍然通过，但文件节点的提示里写明「N 条用例没有验证到（缺图跳过，不算失败，补图后重跑即可）」+ 逐条列出，测试输出里也会打一遍。这样来不及补图时不会把整次运行染红，也不会让人误以为每条用例都验证过了。
+- 用例结论因此比文件多一种取值：`pass | fail | error | skipped`（`CaseOutcome`）。runner 侧由 `runner/lib/results.mjs` 的 `caseOutcome(info)` 判定：有失败报 `fail`，只有缺图报 `skipped`；扩展侧 `collectCaseVerdict()` 认得这四个值。
 - **单条用例运行**：各自一次进程，退出码即结论，失败文案同样优先用 `RESULT-CASE` 给的原因。
 
 ## 换一个仓库来用要改什么
