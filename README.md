@@ -33,22 +33,38 @@ pnpm install
 pnpm run compile
 ```
 
-然后在 VS Code 里有两种调试方式：
+调试的关键点：**运行插件的那个窗口，工作区必须是 MaaEnd 仓库**。插件的一切能力都要读 MaaEnd 的 `maatools.config.mts`、`tests/` 和截图，工作区不对就只能看到空面板。下面三种方式都能做到，按习惯挑一个。
 
-1. **打开本插件目录**（`~/dev/maa-node-test`），按 `F5`。仓库里的 `.vscode/launch.json` 已经把扩展开发宿主的工作区指向 `~/dev/MaaEnd`，起来之后在打开的 MaaEnd 窗口里就能用。
-2. **打开 MaaEnd 仓库**，把下面这段加到 `MaaEnd/.vscode/launch.json` 的 `configurations` 里，再按 `F5`：
+### 方式一（推荐）：用多根工作区文件，MaaEnd 当主工作区
 
-   ```json
-   {
-     "name": "调试 Maa 节点测试插件",
-     "type": "extensionHost",
-     "request": "launch",
-     "args": ["--extensionDevelopmentPath=${userHome}/dev/maa-node-test", "${workspaceFolder}"],
-     "outFiles": ["${userHome}/dev/maa-node-test/out/**/*.js"]
-   }
-   ```
+把 `maa-node-test.code-workspace` 拖进 VS Code（或 `code ~/dev/maa-node-test/maa-node-test.code-workspace`）。它同时打开两个文件夹：
 
-改完代码后重新 `pnpm run compile`（或 `pnpm run watch` 挂着）再重载窗口。
+- `MaaEnd`（排第一个，就是主工作区）—— 测试文件、截图、Pipeline 都在这里；
+- `maa-node-test` —— 插件源码在这里，改代码、打断点都在这个文件夹里。
+
+按 `F5` 会先自动编译，再起一个**工作区是 MaaEnd** 的调试窗口，插件已经装好。在那个窗口里打开任意 `tests/**/test_*.json` 就能看到 CodeLens、hover 和测试面板；在源码窗口里打断点会正常命中（`out/**/*.js.map` 已经配好）。
+
+### 方式二：只开插件目录
+
+打开 `~/dev/maa-node-test` 直接按 `F5`。`.vscode/launch.json` 里的配置值同样是「插件从本目录加载、调试窗口打开 `~/dev/MaaEnd`」，所以调试窗口的工作区还是 MaaEnd，只是源码和测试不在同一个窗口里。
+
+### 方式三：不想换窗口，直接在 MaaEnd 里调试
+
+如果你习惯只在 MaaEnd 窗口里工作，把这段加到 `MaaEnd/.vscode/launch.json` 的 `configurations` 里，按 `F5` 即可（调试窗口就是当前这个 MaaEnd 工作区）：
+
+```json
+{
+  "name": "调试 Maa 节点测试插件",
+  "type": "extensionHost",
+  "request": "launch",
+  "args": ["--extensionDevelopmentPath=${userHome}/dev/maa-node-test", "${workspaceFolder}"],
+  "outFiles": ["${userHome}/dev/maa-node-test/out/**/*.js"]
+}
+```
+
+注意这是本机个人配置：`MaaEnd/.vscode/launch.json` 是仓库里的共享文件，路径里带着你自己的插件位置，别提交上去。
+
+方式一、方式二都配了 `compile` 前置任务，按 `F5` 会自动先编译；方式三需要自己 `pnpm run compile`（或者 `pnpm run watch` 挂着），然后重载调试窗口。
 
 ## 怎么用
 
@@ -166,6 +182,15 @@ pnpm test             # 扩展纯函数单测
 pnpm run test:runner  # runner 单测
 pnpm run test:all     # 上面三件事一起
 ```
+
+格式化沿用 MaaEnd 仓库的 prettier 配置（本项目的 `.prettierrc` 不重复写一份）：
+
+```bash
+~/dev/MaaEnd/node_modules/.bin/prettier --config ~/dev/MaaEnd/.prettierrc.mjs \
+  --write "package.json" "tsconfig.json" ".vscode/*.json" "src/**/*.ts" "runner/**/*.mjs"
+```
+
+`maa-node-test.code-workspace` 刻意排除在格式化之外（`.prettierignore` 里有说明）：它是纯 JSON，不能带尾逗号。
 
 想在终端里手动看某个文件会跑哪些组、图在不在（不加载 MaaFW，几秒出结果）：
 

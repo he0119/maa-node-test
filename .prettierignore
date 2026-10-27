@@ -1,0 +1,6 @@
+# 工作区文件要保持纯 JSON（VS Code 之外的工具也会读），不要被 prettier 加上尾逗号
+maa-node-test.code-workspace
+
+# 构建产物与依赖
+out/
+node_modules/

@@ -7,9 +7,12 @@
             "request": "launch",
             "args": [
                 "--extensionDevelopmentPath=${workspaceFolder}",
-                "${workspaceFolder}/../.."
+                "${workspaceFolder}/../MaaEnd"
             ],
-            "outFiles": ["${workspaceFolder}/out/**/*.js"]
+            "outFiles": [
+                "${workspaceFolder}/out/**/*.js"
+            ],
+            "preLaunchTask": "compile"
         }
     ]
 }
