@@ -72,4 +72,5 @@ node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
 - 契约、内部机制有变化：同步 `reference.md`（面向改代码的人）；
 - 契约或设计有变化：更新对应的 [Agent Note](.agents/notes/README.md)，不要新开一份重复的；
 - 发布相关：`dist/` 和 `*.vsix` 不进 git；发版细节见 `reference.md` 的「构建与发布」；
-- 提交信息用中文约定式提交（`feat:` / `fix:` / `chore:` / `docs:` / `refactor:`，可带 scope），一次提交讲一件事。
+- 提交信息用中文约定式提交（`feat:` / `fix:` / `chore:` / `docs:` / `refactor:`，可带 scope），一次提交讲一件事；
+- **不要主动 `git push`**：本地提交做完就停手，等用户明确说「推」再推。推送是对外可见的动作，节奏由用户掌握。
