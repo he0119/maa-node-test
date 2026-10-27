@@ -1,0 +1,80 @@
+{
+    "name": "maa-node-test",
+    "displayName": "Maa 节点测试",
+    "description": "在 VS Code 里运行 Maa 节点测试用例（单个用例 / 整个文件 / 测试面板），并在悬浮提示里预览各平台截图",
+    "publisher": "MaaEnd",
+    "version": "0.1.0",
+    "private": true,
+    "categories": [
+        "Testing"
+    ],
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "main": "./out/extension.js",
+    "activationEvents": [
+        "workspaceContains:**/maatools.config.mts",
+        "onLanguage:json",
+        "onLanguage:jsonc"
+    ],
+    "contributes": {
+        "commands": [
+            {
+                "command": "maaNodeTest.runFile",
+                "category": "Maa 节点测试",
+                "title": "运行当前测试文件"
+            },
+            {
+                "command": "maaNodeTest.runCase",
+                "category": "Maa 节点测试",
+                "title": "运行当前测试用例"
+            },
+            {
+                "command": "maaNodeTest.showPlan",
+                "category": "Maa 节点测试",
+                "title": "查看当前测试文件的运行计划（不实际执行）"
+            },
+            {
+                "command": "maaNodeTest.refreshTests",
+                "category": "Maa 节点测试",
+                "title": "刷新测试面板"
+            }
+        ],
+        "configuration": {
+            "title": "Maa 节点测试",
+            "properties": {
+                "maaNodeTest.nodePath": {
+                    "type": "string",
+                    "default": "node",
+                    "description": "运行测试时使用的 node 可执行文件。要求 Node 22 及以上；工作区的 node 不在 PATH 里时可以填绝对路径。"
+                },
+                "maaNodeTest.configPath": {
+                    "type": "string",
+                    "default": "maatools.config.mts",
+                    "description": "maa-tools 配置文件路径，相对工作区根目录。"
+                },
+                "maaNodeTest.testsetDir": {
+                    "type": "string",
+                    "default": "tests/MaaEndTestset",
+                    "description": "测试截图根目录，相对工作区根目录。悬浮提示会在这个目录下按平台查找同名截图。"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "compile": "tsc -p .",
+        "check": "tsc -p . --noEmit",
+        "watch": "tsc -p . --watch",
+        "test": "node --test \"out/core/*.test.js\"",
+        "test:runner": "node --test \"runner/lib/*.test.mjs\"",
+        "test:all": "pnpm run compile && pnpm test && pnpm run test:runner"
+    },
+    "dependencies": {
+        "jsonc-parser": "^3.3.1"
+    },
+    "devDependencies": {
+        "@types/node": "^22.18.0",
+        "@types/vscode": "^1.85.0",
+        "typescript": "5.9.3"
+    }
+}
