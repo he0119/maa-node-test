@@ -1,3 +1,8 @@
+<!-- markdownlint-disable MD033 MD041 -->
+<p align="center">
+  <img alt="Maa 节点测试插件" src="./icon.png" width="256" height="256" />
+</p>
+
 # Maa 节点测试插件
 
 Maa 节点测试的 VS Code 插件，基于 `maa-tools` 的节点测试机制（`tests/**/test_*.json` 与测试集截图），适用于任何采用该机制的仓库。默认值取自 MaaEnd（作者日常使用的仓库），均可在设置中调整。
