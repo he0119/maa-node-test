@@ -181,6 +181,8 @@ pnpm run compile
 2. 测试文件叫 `tests/**/test_*.json`（同上）；
 3. 截图按 `<控制器>/<资源服>/<图片>` 分目录放在测试集里。默认路径是 `tests/MaaEndTestset`（MaaEnd 的写法），别的仓库用 `maaNodeTest.testsetDir` 指过去。
 
+图标 `icon.png` 用的是 MaaEnd 项目的 logo（512×512）。fork 之后要换成自己的图标，直接替换这个文件即可。
+
 默认值来自 MaaEnd 纯粹是因为作者日常在测它。换一个仓库来用，一般只需要改 `maaNodeTest.testsetDir` 和 `maaNodeTest.configPath`；如果那个仓库的 `tests/scripts/loader.mts` 用了不一样的组名拼法，插件靠「组名 + 用例键」把用例从全量结果里挑出来这一步也要跟着调（见 [reference.md](.agents/skills/maa-node-test-dev/reference.md#过滤规则)）。
 
 ## 想改这个插件

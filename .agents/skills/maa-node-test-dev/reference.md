@@ -205,6 +205,7 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 ```text
 maa-node-test/
 ├─ package.json          # 扩展清单：命令、设置项、激活事件
+├─ icon.png              # 扩展图标（512×512），取自 MaaEnd 仓库 assets/locales/MaaEnd-Tiny.png
 ├─ tsconfig.json
 ├─ src/
 │  ├─ extension.ts       # 只做装配：输出面板、provider、命令
@@ -283,7 +284,7 @@ node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
 
 ### VSIX 里有什么
 
-`.vscodeignore` 只留四类东西：`package.json`、`README.md`、`dist/**`、`LICENSE`（有的话）。`src/`、`out/`、`runner/`、`scripts/`、`.github/`、`.agents/`、`pnpm-workspace.yaml` 都不进包。打出来的包约 127KB、9 个文件，解包后**没有 node_modules**也能跑（已验证：从解包目录直接执行 `dist/run-single-test.mjs` 正常）。
+`.vscodeignore` 只留五类东西：`package.json`、`README.md`、`icon.png`、`dist/**`、`LICENSE`（有的话）。`src/`、`out/`、`runner/`、`scripts/`、`.github/`、`.agents/`、`pnpm-workspace.yaml` 都不进包。打出来的包约 127KB、9 个文件，解包后**没有 node_modules**也能跑（已验证：从解包目录直接执行 `dist/run-single-test.mjs` 正常）。
 
 ### 本地怎么打包
 
