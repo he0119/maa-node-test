@@ -225,7 +225,8 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 | `providers/definition.ts` |
 
 - 节点相关的三种能力只认 `cases[n].hits[m]` 和 `cases[n].hits[m].node` 这两个路径（`isHitsEntryPath()`），在 `name` 里点到同名文字不跳也不弹；
-- `image` 字段的跳转走另一条路：`findImageFieldAt()` 认出光标在键或值上，`locateImage()` 扫全平台，`chooseImage()` 按声明的平台顺序取第一张（Platform 别名先经 `resolveControllerDir()` 换成目录名）。同时存在多个平台时**只跳一张**，不给列表 —— 想看别的平台用悬浮里的「打开原图」；
+- `image` 字段的跳转走另一条路：`findImageFieldAt()` 认出光标在键或值上，`locateImage()` 扫全平台，`orderImageLocations()` 按声明的平台顺序排好（别名先经 `resolveControllerDir()` 换成目录名），**全部返回**；
+- **多结果一律返回列表**（`provideDefinition` 返回数组），VS Code 会弹 peek 让人挑。理由是实际使用中「某个平台的图有问题，只想进那张看」很常见，直接挑比先跳默认平台再翻要快；列表顺序和悬浮预览用的是同一个 `orderImageLocations()`，两处顺序不会打架；
 - 节点名写错时：悬浮说「pipeline 里没有这个节点」，跳转给空；
 - 识别/动作的取值要兼容两种写法：字符串（`"recognition": "TemplateMatch"`）和对象（`{"type": "TemplateMatch"}`），没写就退回 `custom_recognition` / `custom_action`；
 - 源码片段按 `keyOffset` 到 `endOffset` 从原文截，所以悬浮里看到的就是 pipeline 里真实的那一段，不是重新序列化的结果；

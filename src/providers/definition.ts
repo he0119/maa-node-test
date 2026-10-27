@@ -5,13 +5,14 @@ import {findImageFieldAt, parseTestDocument} from "../core/document";
 import {resolveControllerDir} from "../core/loaderMaps";
 import {isHitsEntryPath} from "../core/pipeline";
 import type {RepoIndex} from "../core/repoIndex";
-import {chooseImage, locateImage} from "../core/testset";
+import {locateImage, orderImageLocations} from "../core/testset";
 
 /**
- * 测试文件里有两处可以 Ctrl+Click / F12 跳转：
+ * 测试文件里有两处可以 Ctrl+Click / F12 跳转，**有多处结果时返回列表**（VS Code 会弹 peek 让人挑）：
  *
- * - `image` 字段（键或值都算）→ 打开这张截图（同一个文件名在多个平台都有时，按本文件声明的平台顺序挑）；
- * - `hits` 里的节点名（`cases[n].hits[m]` 及其 `.node` 写法）→ 跳到它在 pipeline 里的定义。
+ * - `image` 字段（键或值都算）→ 这张截图在各平台的副本，顺序跟本文件 `configs.controller` 一致。
+ *   很多时候只是想确认某个平台的图，列表里直接挑那个平台即可；
+ * - `hits` 里的节点名（`cases[n].hits[m]` 及其 `.node` 写法）→ 它在 pipeline 里的定义（可能有多层覆盖）。
  *
  * 其它位置不跳 —— 免得在 `name` 字段里点到同名文字就乱跳。
  */
@@ -21,7 +22,7 @@ export class NodeTestDefinitionProvider implements vscode.DefinitionProvider {
     async provideDefinition(
         document: vscode.TextDocument,
         position: vscode.Position,
-    ): Promise<vscode.Location | undefined> {
+    ): Promise<vscode.Location[] | undefined> {
         const text = document.getText();
         const offset = document.offsetAt(position);
         const index = this.indexOf();
@@ -38,13 +39,17 @@ export class NodeTestDefinitionProvider implements vscode.DefinitionProvider {
         if (!node || node.type !== "string" || typeof node.value !== "string") return undefined;
         if (!isHitsEntryPath(getNodePath(node))) return undefined;
 
-        const info = index.nodeInfo(node.value);
-        if (!info) return undefined;
+        const infos = index.nodeInfos(node.value);
+        if (infos.length === 0) return undefined;
 
         // 目标文件可能没被打开过，位置要按它自己的文本算，不能拿当前文档的 positionAt
-        const targetUri = vscode.Uri.file(info.filePath);
-        const target = await vscode.workspace.openTextDocument(targetUri);
-        return new vscode.Location(targetUri, target.positionAt(info.keyOffset));
+        const locations: vscode.Location[] = [];
+        for (const info of infos) {
+            const targetUri = vscode.Uri.file(info.filePath);
+            const target = await vscode.workspace.openTextDocument(targetUri);
+            locations.push(new vscode.Location(targetUri, target.positionAt(info.keyOffset)));
+        }
+        return locations;
     }
 }
 
@@ -52,7 +57,7 @@ export class NodeTestDefinitionProvider implements vscode.DefinitionProvider {
  * 光标落在 `image` 字段上时，指向对应的截图文件。
  * 多个平台都有这张图时只用声明顺序里的第一张，其余的在悬浮里点「打开原图」。
  */
-function imageLocation(text: string, offset: number, index: RepoIndex | null): vscode.Location | undefined {
+function imageLocation(text: string, offset: number, index: RepoIndex | null): vscode.Location[] | undefined {
     const parsed = parseTestDocument(text);
     const field = findImageFieldAt(parsed, offset);
     if (!field) return undefined;
@@ -60,16 +65,19 @@ function imageLocation(text: string, offset: number, index: RepoIndex | null): v
     const workspace = resolveNodeTestWorkspace();
     if (!workspace) return undefined;
 
-    // 别名（Win32-Front → Win32）先换成目录名，才能按声明顺序挑到对应那一张
+    // 别名（Win32-Front → Win32）先换成目录名，才能按声明顺序把对应平台排在前面
     const resolvePlatform = (controller: string): string =>
         index ? resolveControllerDir(index.maps(), controller) : controller;
-    const chosen = chooseImage(
+
+    const ordered = orderImageLocations(
         locateImage(workspace.testsetRoot, field.value),
         parsed.configs.controller,
         resolvePlatform,
-    );
-    if (!chosen?.filePath) return undefined;
+    ).filter((location) => location.filePath !== null);
+    if (ordered.length === 0) return undefined;
 
     // 图片没有「第几行」，给文件开头就行，VS Code 会按图片预览打开
-    return new vscode.Location(vscode.Uri.file(chosen.filePath), new vscode.Position(0, 0));
+    return ordered.map(
+        (location) => new vscode.Location(vscode.Uri.file(location.filePath ?? ""), new vscode.Position(0, 0)),
+    );
 }

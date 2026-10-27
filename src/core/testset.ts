@@ -123,24 +123,24 @@ function listDirs(parent: string): string[] {
 }
 
 /**
- * 从扫描结果里挑一张图给「Ctrl+Click 跳到截图」用。
+ * 按本文件声明的 controller 顺序排一遍截图：声明了的排前面（按声明顺序），没声明的按扫描顺序接在后面。
  *
- * 优先按本文件声明的平台顺序挑（`configs.controller` 的第一项），挑不到再退回扫描顺序里的第一张 ——
- * 同一个文件名在多个平台都有时，跳到一个确定的、符合用户预期的位置，比弹一个列表让人选更省事；
- * 想看别的平台的照片，悬浮里已经列了全部「打开原图」链接。
+ * 悬浮预览和 Ctrl+Click 的列表都用这个顺序 —— 两处不一致看着别扭：文件里写 `["Win32", "ADB"]`，
+ * 一处 Win32 在前、一处 ADB 在前，很容易看串。
  */
-export function chooseImage(
+export function orderImageLocations(
     locations: readonly ImageLocation[],
     controllers: readonly string[] = [],
     resolvePlatform: (controller: string) => string = (controller) => controller,
-): ImageLocation | undefined {
-    const found = locations.filter((location) => location.filePath !== null);
-    if (found.length === 0) return undefined;
+): ImageLocation[] {
+    if (controllers.length === 0) return [...locations];
 
-    for (const controller of controllers) {
-        const dir = resolvePlatform(controller);
-        const hit = found.find((location) => location.platform === dir);
-        if (hit) return hit;
-    }
-    return found[0];
+    const declared = controllers.map(resolvePlatform);
+    const rankOf = (platform: string): number => {
+        const index = declared.indexOf(platform);
+        return index < 0 ? declared.length : index;
+    };
+
+    // sort 是稳定的：同样名次的平台保持原来的扫描顺序
+    return [...locations].sort((left, right) => rankOf(left.platform) - rankOf(right.platform));
 }

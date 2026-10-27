@@ -3,7 +3,7 @@ import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import * as path from "node:path";
 import {test} from "node:test";
-import {chooseImage, locateImage, readPngSize, scanTestsetDirs} from "./testset";
+import {locateImage, orderImageLocations, readPngSize, scanTestsetDirs} from "./testset";
 
 /** 造一个只有 PNG 头 + IHDR 的假文件，够 readPngSize 读尺寸用了 */
 function fakePng(width: number, height: number): Buffer {
@@ -134,56 +134,66 @@ test("readPngSize 对非 PNG、缺失文件都返回 null", (t) => {
     assert.equal(readPngSize(truncated), null);
 });
 
-test("挑跳转用的截图：按声明平台顺序挑，挑不到退回第一张", () => {
+test("平台排序：声明过的按声明顺序排前面，没声明的按扫描顺序跟在后面", () => {
     const cloud = {platform: "CloudADB", resource: "Official_CN", filePath: "/x/cloud.png", size: null};
     const win32 = {platform: "Win32", resource: "Official_CN", filePath: "/x/win32.png", size: null};
-    const missing = {platform: "ADB", resource: "Official_CN", filePath: null, size: null};
+    const adb = {platform: "ADB", resource: "Official_CN", filePath: "/x/adb.png", size: null};
 
-    // 声明顺序里 ADB 没图、Win32 有图 → 选 Win32
-    assert.equal(
-        chooseImage(
-            [
-                cloud,
-                missing,
-                win32,
-            ],
-            [
-                "ADB",
-                "Win32",
-            ],
-        )?.filePath,
-        "/x/win32.png",
+    const ordered = orderImageLocations(
+        [
+            adb,
+            cloud,
+            win32,
+        ],
+        [
+            "Win32",
+            "ADB",
+        ],
     );
-    // 声明了 CloudADB → 选它
-    assert.equal(
-        chooseImage(
-            [
-                cloud,
-                win32,
-            ],
-            ["CloudADB"],
-        )?.filePath,
-        "/x/cloud.png",
+    assert.deepEqual(
+        ordered.map((item) => item.platform),
+        [
+            "Win32",
+            "ADB",
+            "CloudADB",
+        ],
     );
-    // 声明里一个都没有 → 扫描顺序第一张
-    assert.equal(
-        chooseImage(
+
+    // 没写 controller 就保持扫描顺序
+    assert.deepEqual(
+        orderImageLocations(
             [
+                adb,
                 cloud,
                 win32,
             ],
-            ["Switch"],
-        )?.filePath,
-        "/x/cloud.png",
+            [],
+        ).map((item) => item.platform),
+        [
+            "ADB",
+            "CloudADB",
+            "Win32",
+        ],
     );
-    // 一张都没有 → undefined
-    assert.equal(chooseImage([missing], ["ADB"]), undefined);
 });
 
-test("挑跳转用的截图：别名平台按目录名匹配", () => {
+test("平台排序：别名按目录名对号入座", () => {
     const win32 = {platform: "Win32", resource: "Official_CN", filePath: "/x/win32.png", size: null};
-    const chosen = chooseImage([win32], ["Win32-Front"], (controller) =>
-        controller === "Win32-Front" ? "Win32" : controller,
+    const adb = {platform: "ADB", resource: "Official_CN", filePath: "/x/adb.png", size: null};
+
+    const ordered = orderImageLocations(
+        [
+            adb,
+            win32,
+        ],
+        ["Win32-Front"],
+        (controller: string) => (controller === "Win32-Front" ? "Win32" : controller),
     );
-    assert.equal(chosen?.filePath, "/x/win32.png");
+    assert.deepEqual(
+        ordered.map((item) => item.platform),
+        [
+            "Win32",
+            "ADB",
+        ],
+    );
 });

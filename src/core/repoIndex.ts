@@ -24,7 +24,7 @@ const NODE_CACHE_TTL_MS = 10_000;
 export class RepoIndex implements RepoData {
     private mapsCache: {stamp: number; maps: LoaderMaps} | undefined;
     private imageCache: {stamp: string; byPlatform: Map<string, string[]>} | undefined;
-    private nodeCache: {at: number; nodes: Map<string, PipelineNode>} | undefined;
+    private nodeCache: {at: number; nodes: Map<string, PipelineNode[]>} | undefined;
     /** 单个 pipeline 文件的解析结果，按 mtime 复用：TTL 过期后只重新解析改过的文件 */
     private readonly nodeFiles = new Map<string, {mtime: number; nodes: PipelineNode[]}>();
 
@@ -61,9 +61,16 @@ export class RepoIndex implements RepoData {
         return [...this.nodeIndex().keys()].sort();
     }
 
-    /** 某个节点的定义位置和说明；名字写错时返回 undefined */
+    /** 某个节点的定义位置和说明；同名节点有多处定义时给第一处 */
     nodeInfo(name: string): PipelineNode | undefined {
-        return this.nodeIndex().get(name);
+        return this.nodeIndex().get(name)?.[0];
+    }
+
+    /** 同一个节点名的所有定义（别的仓库可能有分层覆盖），按文件路径排序保证顺序稳定 */
+    nodeInfos(name: string): PipelineNode[] {
+        return [...(this.nodeIndex().get(name) ?? [])].sort((left, right) =>
+            left.filePath.localeCompare(right.filePath),
+        );
     }
 
     /**
@@ -87,10 +94,10 @@ export class RepoIndex implements RepoData {
     }
 
     /** 节点名 → 节点信息；同名节点以先扫到的为准（MaaEnd 里不该有重名） */
-    private nodeIndex(): Map<string, PipelineNode> {
+    private nodeIndex(): Map<string, PipelineNode[]> {
         if (this.nodeCache && Date.now() - this.nodeCache.at < NODE_CACHE_TTL_MS) return this.nodeCache.nodes;
 
-        const nodes = new Map<string, PipelineNode>();
+        const nodes = new Map<string, PipelineNode[]>();
         const seen = new Set<string>();
         for (const file of listJsonFiles(path.join(this.workspaceRoot, PIPELINE_DIR))) {
             seen.add(file);
@@ -101,7 +108,9 @@ export class RepoIndex implements RepoData {
             this.nodeFiles.set(file, {mtime, nodes: parsed});
 
             for (const node of parsed) {
-                if (!nodes.has(node.name)) nodes.set(node.name, node);
+                const list = nodes.get(node.name);
+                if (list) list.push(node);
+                else nodes.set(node.name, [node]);
             }
         }
         for (const file of [...this.nodeFiles.keys()]) {

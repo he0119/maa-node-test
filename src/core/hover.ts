@@ -1,3 +1,4 @@
+import {orderImageLocations} from "./testset";
 import type {ImageLocation} from "./testset";
 
 export interface ImageHoverInput {
@@ -68,17 +69,8 @@ export function buildImageHoverMarkdown(input: ImageHoverInput, toUriString: (ab
  * 对不上，看的时候容易串行。
  */
 function orderLocations(input: ImageHoverInput): ImageLocation[] {
-    if (input.controllers.length === 0) return [...input.locations];
-
-    const dirOf = (controller: string): string => input.controllerDirs?.get(controller) ?? controller;
-    const declared = input.controllers.map(dirOf);
-    const rankOf = (platform: string): number => {
-        const index = declared.indexOf(platform);
-        return index < 0 ? declared.length : index;
-    };
-
-    // sort 是稳定的：同样名次的平台保持原来的扫描顺序
-    return [...input.locations].sort((left, right) => rankOf(left.platform) - rankOf(right.platform));
+    const resolvePlatform = (controller: string): string => input.controllerDirs?.get(controller) ?? controller;
+    return orderImageLocations(input.locations, input.controllers, resolvePlatform);
 }
 
 /** 本文件声明了、但测试集里没扫到的平台（名字对不上或目录缺失） */
