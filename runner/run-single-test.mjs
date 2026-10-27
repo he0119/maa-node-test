@@ -19,7 +19,7 @@ import path from "node:path";
 import {USAGE, UsageError, parseArgs} from "./lib/args.mjs";
 import {caseKey, hitNodeNames} from "./lib/case-key.mjs";
 import {filterGroupsForFiles, groupLabel, groupName} from "./lib/filter.mjs";
-import {countImages, scanImages} from "./lib/images.mjs";
+import {countImages, resolveImagePath, scanImages} from "./lib/images.mjs";
 import {MaaToolsLoadError, describeMaaToolsSource, importMaaTools} from "./lib/maa-tools.mjs";
 import {displayPath, resolveFromWorkspace, toPosix} from "./lib/paths.mjs";
 import {readPngSize} from "./lib/png.mjs";
@@ -27,8 +27,11 @@ import {printResult} from "./lib/report.mjs";
 import {
     aggregateFileResults,
     attributeGroupResults,
+    formatCaseFailure,
+    formatCaseResultLine,
     formatFileResultLine,
     hasAnyAttributedGroup,
+    locateCaseFailures,
     normalizeFileResults,
     overallVerdict,
 } from "./lib/results.mjs";
@@ -279,6 +282,35 @@ async function run() {
         );
     }
 
+    // 逐用例原因：失败明细来自 maa-tools 自己写的 error_details.json（结构化，比解析文本可靠），
+    // 只有本次运行确实更新了它才算数 —— 否则会把上一次运行留下的失败张冠李戴。
+    const errorDetails = readFreshErrorDetails(detailsPath, detailsMtimeBefore);
+    const caseResults = locateCaseFailures({
+        errorDetails,
+        groups,
+        entries,
+        owners,
+        resolveImage: (group, image) => resolveImagePath(cfg, group, image),
+        isImageMissing: (group, testCase) => !existsSync(resolveImagePath(cfg, group, testCase.image)),
+    });
+
+    // 有失败的用例报 fail（顺便说明哪些平台是好的），只缺图的报 error
+    const caseFailures = new Map();
+    const caseSkipped = new Map();
+    for (const [
+        key,
+        info,
+    ] of caseResults) {
+        if (info.failures.length > 0) caseFailures.set(key, formatCaseFailure(info));
+        else if (info.missing.length > 0) caseSkipped.set(key, formatCaseFailure(info));
+    }
+
+    // 有明确的用例级失败，文件结论一定是失败（万一组名归因漏了，这里补上）
+    for (const key of caseFailures.keys()) {
+        const fileKey = key.slice(0, key.lastIndexOf("#"));
+        if (fileResults.get(fileKey) === "pass") fileResults.set(fileKey, "fail");
+    }
+
     console.log("");
     console.log("按文件结果：");
     for (const entry of entries) {
@@ -286,11 +318,86 @@ async function run() {
         console.log(`  ${verdictMark(verdict)} ${entry.key}`);
     }
 
+    if (caseFailures.size > 0) {
+        console.log("");
+        console.log("逐用例失败原因：");
+        for (const [
+            key,
+            text,
+        ] of caseFailures) {
+            const [
+                fileKey,
+                indexText,
+            ] = splitCaseKey(key);
+            console.log(`  ✗ ${fileKey} 第 ${Number(indexText) + 1} 个用例：${text.title}`);
+            for (const line of text.lines) console.log(`      · ${line}`);
+        }
+    }
+
+    if (caseSkipped.size > 0) {
+        console.log("");
+        console.log("被跳过的用例（截图不存在，等于没验证）：");
+        for (const [
+            key,
+            text,
+        ] of caseSkipped) {
+            const [
+                fileKey,
+                indexText,
+            ] = splitCaseKey(key);
+            console.log(`  ！ ${fileKey} 第 ${Number(indexText) + 1} 个用例：${text.title}`);
+            for (const line of text.lines) console.log(`      · ${line}`);
+        }
+    }
+
+    for (const [
+        key,
+        text,
+    ] of caseFailures) {
+        const [
+            fileKey,
+            indexText,
+        ] = splitCaseKey(key);
+        console.log(formatCaseResultLine(fileKey, Number(indexText), "fail", text.title, text.lines));
+    }
+    for (const [
+        key,
+        text,
+    ] of caseSkipped) {
+        const [
+            fileKey,
+            indexText,
+        ] = splitCaseKey(key);
+        console.log(formatCaseResultLine(fileKey, Number(indexText), "error", text.title, text.lines));
+    }
+
     for (const entry of entries) {
         console.log(formatFileResultLine(entry.key, fileResults.get(entry.key) ?? "error"));
     }
 
     return overallVerdict(fileResults);
+}
+
+/** 读 error_details.json，只认本次运行更新的那一份 */
+function readFreshErrorDetails(detailsPath, mtimeBefore) {
+    if (!detailsPath || !existsSync(detailsPath)) return [];
+    if (mtimeMs(detailsPath) === mtimeBefore) return [];
+    try {
+        const parsed = JSON.parse(readFileSync(detailsPath, "utf8"));
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        // 明细文件坏了不该让整次运行失败：逐用例原因缺失而已，文件级结论仍然有效
+        return [];
+    }
+}
+
+/** caseFailures 的 key 是 `<文件>#<下标>`，文件名里理论上可能有 #，所以从最后一个切 */
+function splitCaseKey(key) {
+    const index = key.lastIndexOf("#");
+    return [
+        key.slice(0, index),
+        key.slice(index + 1),
+    ];
 }
 
 /** 每个文件一共涉及几张截图、其中几张真的存在（用于判断这个文件到底有没有被验证到） */

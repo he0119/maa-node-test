@@ -5,7 +5,7 @@ description: 改这个 Maa 节点测试 VS Code 插件时使用。适用于改�
 
 # Maa 节点测试插件开发
 
-先读 [README.md](../../../README.md)（功能、限制、设置项）和 [reference.md](reference.md)（每个文件的职责、runner 命令行契约、退出码映射、hover 文本格式）。本文件只讲「改东西时该动哪里、别踩什么」。
+先读 [README.md](../../../README.md)（面向使用者：功能、设置项、排错）和 [reference.md](reference.md)（面向改代码的人：每个文件的职责、runner 命令行契约、退出码映射、失败结论怎么产生、hover 文本格式）。本文件只讲「改东西时该动哪里、别踩什么」。
 
 ## 数据流
 
@@ -35,9 +35,10 @@ description: 改这个 Maa 节点测试 VS Code 插件时使用。适用于改�
 | 测试面板的树结构 | `src/core/testExplorer.ts`（纯函数）+ `src/testing.ts`（vscode 适配） | 单测 |
 | 测试面板运行顺序/取消/排除 | `src/testing.ts` 的 `collectTargets` 与 `runTarget` | — |
 | 过滤规则（跑哪些组/用例） | `runner/lib/filter.mjs` + `runner/lib/case-key.mjs` | `runner/lib/filter.test.mjs` |
-| 新增 runner 参数 | `runner/lib/args.mjs` → `src/core/runnerArgs.ts` → `src/testing.ts` / `src/runner.ts` | README 与 `reference.md` 的契约段 |
-| 退出码含义 | `runner/lib/report.mjs` → `src/runner.ts` `report()` → `src/testing.ts` `describeFailure()` | README 表格、`reference.md` |
-| 新增设置项 | `package.json` 的 `contributes.configuration` + `src/config.ts` | README 设置项表 |
+| 新增 runner 参数 | `runner/lib/args.mjs` → `src/core/runnerArgs.ts` → `src/testing.ts` / `src/runner.ts` | `reference.md` 的命令行契约段 |
+| 退出码含义 | `runner/lib/report.mjs` → `src/core/testResult.ts` `verdictFromExitCode()` → `src/testing.ts` 标记 | `reference.md` 的退出码表 |
+| 新增设置项 | `package.json` 的 `contributes.configuration` + `src/config.ts` | README 设置项表（面向用户） |
+| 失败信息文案 | `runner/lib/results.mjs` `classifyErrorEntry()` / `formatCaseFailure()` → `src/core/testResult.ts` 的 Markdown 拼装 | `reference.md` 的逐用例结论段 |
 
 ## 验证步骤（按顺序做，别跳过）
 

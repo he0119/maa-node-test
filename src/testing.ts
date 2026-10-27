@@ -4,6 +4,17 @@ import {readNodeTestConfig, resolveNodeTestWorkspace} from "./config";
 import type {NodeTestWorkspace} from "./config";
 import {isTestFilePath, parseTestDocument} from "./core/document";
 import {buildBatchRunTitle, buildRunTitle} from "./core/runnerArgs";
+import {
+    buildMessageMarkdown,
+    caseKeyOf,
+    collectCaseVerdict,
+    collectFileVerdict,
+    describeFileFailure,
+    describeVerdict,
+    fallbackVerdict,
+    verdictFromExitCode,
+} from "./core/testResult";
+import type {CaseVerdict, FileVerdict} from "./core/testResult";
 import {buildFileNode, folderSegments} from "./core/testExplorer";
 import {describeCommand, startTestProcess} from "./runner";
 import type {RunRequest} from "./runner";
@@ -32,9 +43,6 @@ const TEST_FILE_GLOBS = [
     "**/tests/**/test_*.jsonc",
 ];
 
-/** runner 给每个文件打的结论行：`RESULT-FILE: <相对路径> pass|fail|error` */
-const FILE_RESULT_PATTERN = /^RESULT-FILE: (.+) (pass|fail|error)$/;
-
 /** 叶子节点（文件或用例）的元信息。面板运行时靠它把节点还原成 runner 参数 */
 interface LeafInfo {
     /** 测试文件绝对路径 */
@@ -57,9 +65,6 @@ interface TestFileEntry {
     parsed: ReturnType<typeof parseTestDocument>;
     relativePath: string;
 }
-
-/** 单个文件的结论 */
-type FileVerdict = "pass" | "fail" | "error";
 
 export class NodeTestExplorer implements vscode.Disposable {
     private readonly controller: vscode.TestController;
@@ -329,6 +334,7 @@ export class NodeTestExplorer implements vscode.Disposable {
 
         const startedAt = Date.now();
         const verdicts = new Map<string, FileVerdict>();
+        const caseVerdicts = new Map<string, CaseVerdict>();
         let pending = "";
 
         const process = startTestProcess(runRequest, this.extensionPath, {
@@ -337,14 +343,18 @@ export class NodeTestExplorer implements vscode.Disposable {
                 pending += chunk;
                 const lines = pending.split("\n");
                 pending = lines.pop() ?? "";
-                for (const line of lines) this.collectFileVerdict(line, verdicts);
+                for (const line of lines) {
+                    collectFileVerdict(line, verdicts);
+                    collectCaseVerdict(line, caseVerdicts);
+                }
             },
             onError: (error) => testRun.appendOutput(`✖ 进程没起来：${String(error)}\r\n`, undefined, anchor),
         });
         const cancellation = token.onCancellationRequested(() => process.cancel());
         const outcome = await process.done;
         cancellation.dispose();
-        this.collectFileVerdict(pending, verdicts);
+        collectFileVerdict(pending, verdicts);
+        collectCaseVerdict(pending, caseVerdicts);
         const duration = Date.now() - startedAt;
 
         if (outcome.cancelled) {
@@ -354,37 +364,63 @@ export class NodeTestExplorer implements vscode.Disposable {
 
         for (const target of targets) {
             const verdict = verdicts.get(target.relativePath) ?? fallbackVerdict(outcome.code);
-            this.markFileTarget(testRun, target, verdict, duration);
+            this.markFileTarget(testRun, target, verdict, duration, caseVerdicts);
         }
     }
 
-    /** 从一行输出里抓 `RESULT-FILE:` 结论 */
-    private collectFileVerdict(line: string, verdicts: Map<string, FileVerdict>): void {
-        const match = line.replace(/\r$/, "").match(FILE_RESULT_PATTERN);
-        if (!match) return;
-        verdicts.set(toPosix(match[1]), match[2] as FileVerdict);
-    }
+    /**
+     * 按文件结论标记。子用例优先用 runner 给的逐用例结论（带具体原因），没有就跟随文件结论。
+     */
+    private markFileTarget(
+        testRun: vscode.TestRun,
+        target: RunTarget,
+        verdict: FileVerdict,
+        duration: number,
+        caseVerdicts: ReadonlyMap<string, CaseVerdict>,
+    ): void {
+        const cases = [...target.item.children].map(
+            ([
+                id,
+                item,
+            ]) => {
+                const leaf = this.leaves.get(id);
+                const info =
+                    leaf?.caseIndex === undefined
+                        ? undefined
+                        : caseVerdicts.get(caseKeyOf(target.relativePath, leaf.caseIndex));
+                return {item, info, caseIndex: leaf?.caseIndex};
+            },
+        );
+        const knownCases = cases.filter((entry) => entry.info !== undefined);
 
-    /** 按文件结论标记：文件节点和它的子用例一起标 */
-    private markFileTarget(testRun: vscode.TestRun, target: RunTarget, verdict: FileVerdict, duration: number): void {
-        const items = [
-            target.item,
-            ...[...target.item.children].map(
-                ([
-                    ,
-                    item,
-                ]) => item,
-            ),
-        ];
         if (verdict === "pass") {
-            for (const item of items) testRun.passed(item, duration);
+            testRun.passed(target.item, duration);
+            for (const entry of cases) testRun.passed(entry.item, duration);
             return;
         }
 
-        const message = new vscode.TestMessage(describeVerdict(verdict, target.relativePath));
-        for (const item of items) {
-            if (verdict === "fail") testRun.failed(item, message, duration);
-            else testRun.errored(item, message, duration);
+        const fileText = describeFileFailure(target.relativePath, verdict, knownCases);
+        const fileMessage = buildTestMessage(fileText.title, fileText.detail);
+        if (verdict === "fail") testRun.failed(target.item, fileMessage, duration);
+        else testRun.errored(target.item, fileMessage, duration);
+
+        for (const entry of cases) {
+            const info = entry.info;
+            if (info) {
+                const caseMessage = buildTestMessage(info.title, info.detail);
+                if (info.verdict === "fail") testRun.failed(entry.item, caseMessage, duration);
+                else if (info.verdict === "error") testRun.errored(entry.item, caseMessage, duration);
+                else testRun.passed(entry.item, duration);
+                continue;
+            }
+
+            // 没有任何逐用例信息时跟随文件结论；有信息但这条没被点名，说明它确实通过了
+            if (knownCases.length === 0) {
+                if (verdict === "fail") testRun.failed(entry.item, fileMessage, duration);
+                else testRun.errored(entry.item, fileMessage, duration);
+            } else {
+                testRun.passed(entry.item, duration);
+            }
         }
     }
 
@@ -411,13 +447,22 @@ export class NodeTestExplorer implements vscode.Disposable {
         testRun.appendOutput(`${describeCommand(runRequest, this.extensionPath)}\r\n`, undefined, target.item);
 
         const startedAt = Date.now();
+        const caseVerdicts = new Map<string, CaseVerdict>();
+        let pending = "";
         const process = startTestProcess(runRequest, this.extensionPath, {
-            onOutput: (chunk) => testRun.appendOutput(toOutputChunk(chunk), undefined, target.item),
+            onOutput: (chunk) => {
+                testRun.appendOutput(toOutputChunk(chunk), undefined, target.item);
+                pending += chunk;
+                const lines = pending.split("\n");
+                pending = lines.pop() ?? "";
+                for (const line of lines) collectCaseVerdict(line, caseVerdicts);
+            },
             onError: (error) => testRun.appendOutput(`✖ 进程没起来：${String(error)}\r\n`, undefined, target.item),
         });
         const cancellation = token.onCancellationRequested(() => process.cancel());
         const outcome = await process.done;
         cancellation.dispose();
+        collectCaseVerdict(pending, caseVerdicts);
         const duration = Date.now() - startedAt;
 
         if (outcome.cancelled) {
@@ -430,44 +475,14 @@ export class NodeTestExplorer implements vscode.Disposable {
             testRun.passed(target.item, duration);
             return;
         }
-        const message = new vscode.TestMessage(describeVerdict(verdict, title));
+
+        // 单条用例跑时 runner 也会给逐用例结论，原因比通用话术有用得多
+        const known = caseVerdicts.get(caseKeyOf(target.relativePath, target.caseIndex ?? 0));
+        const fallback = describeVerdict(verdict, title);
+        const message = buildTestMessage(known?.title ?? fallback.title, known?.detail ?? fallback.detail);
         if (verdict === "fail") testRun.failed(target.item, message, duration);
         else testRun.errored(target.item, message, duration);
     }
-}
-
-/** 退出码 → 文件结论（批量跑时个别文件没打 RESULT-FILE，用它兜底） */
-function verdictFromExitCode(code: number | null): FileVerdict {
-    if (code === 0) return "pass";
-    if (code === 1) return "fail";
-    return "error";
-}
-
-/** 批量跑兜底：进程整体成功但某个文件没有结论行时，按 pass；否则一律 error */
-function fallbackVerdict(processExitCode: number | null): FileVerdict {
-    return processExitCode === 0 ? "pass" : "error";
-}
-
-/** 结论翻译成人话，直接显示在测试面板的失败信息里 */
-export function describeVerdict(verdict: FileVerdict, title: string): string {
-    if (verdict === "fail") {
-        return (
-            `${title} 断言失败。具体是哪个节点没命中、还是识别框对不上，看测试输出里的红色组名，` +
-            `或者工作区里的 tests/maatools/error_details.json。`
-        );
-    }
-    if (verdict === "error") {
-        return (
-            `${title} 没跑起来或没被验证到（不是断言失败）。常见原因：node 版本低于 22（改设置 maaNodeTest.nodePath）、` +
-            `截图一张都不存在、maatools 配置加载失败、MaaFW 首次下载失败。测试输出里有具体原因。`
-        );
-    }
-    return `${title} 通过。`;
-}
-
-/** 退出码翻译成人话（保留给外部调用与单测） */
-export function describeFailure(code: number | null, title: string): string {
-    return describeVerdict(verdictFromExitCode(code), title);
 }
 
 /**
@@ -519,6 +534,11 @@ export function collectTargets(
         ...fileTargets.values(),
         ...deduped,
     ];
+}
+
+/** 面板里的失败信息：标题用粗体一行，明细用列表（MarkdownString 才会按 Markdown 渲染） */
+function buildTestMessage(title: string, detail: readonly string[]): vscode.TestMessage {
+    return new vscode.TestMessage(new vscode.MarkdownString(buildMessageMarkdown(title, detail)));
 }
 
 /** TestRun.appendOutput 要求换行用 \r\n，否则测试输出面板里会挤成一坨 */

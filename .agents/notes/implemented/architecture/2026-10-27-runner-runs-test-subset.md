@@ -18,6 +18,8 @@ MaaEnd 的节点测试只有全量入口 `pnpm test`（`maa-tools test`），没
 4. 自己做截图存在性预检；
 5. 调 `runTest(cfg)`，把结果翻译成固定接口：逐文件 `RESULT-FILE: <路径> pass|fail|error`、最后一行 `RESULT: pass|fail|error|empty` ＋ 退出码 `0/1/2/3`。
 
+**逐用例原因**来自 maa-tools 自己写的 `cfg.test.errorDetailsPath`（MaaEnd 里是 `tests/maatools/error_details.json`），每条含 `imagePath`、`node`、`hit`、`detail.{algorithm, box}`。runner 用「组的 imageRoot + 用例图片名」推出期望路径去匹配条目，再用**用例自己的期望**重新判一遍（该命中没命中 / 不该命中却命中 / 框超出范围），产出 `RESULT-CASE: {json}` 行，面板直接显示这句话。只有本次运行更新过这个文件才采信（比 mtime），避免把上一次运行的失败张冠李戴。之前的做法只给一句「断言失败，自己去看红色组名」，定位一条用例要重跑一次，这是本轮补掉的主要体验缺口。
+
 `--file` 支持重复：**一批文件共用一次进程**。MaaFW 初始化 + `assets/` 加载是单次运行的固定大头（实测单文件 4~5 秒，而只做配置加载与过滤的 dry-run 只要 0.56 秒），一个文件一个进程等于把这份开销重复几十次。合并之后逐文件的结论这样拿到：`runTest` 只给整批一个布尔值，但它会为每个组打印一行组名、失败时紧跟行首两空格的明细行，于是把 stdout 抄一份，按「组名行 / 明细行」判定每组，再按 `owners` 分发到文件（`lib/results.mjs`）。截图全缺、或过滤后一个组都没匹配到的文件，结论强制记 `error`，不允许显示成通过。
 
 扩展侧只认这个接口：`src/core/runnerArgs.ts` 负责拼参数、`src/runner.ts` 统一起进程、`src/testing.ts` 和 `src/runner.ts` 各自把退出码翻成人话。
@@ -39,6 +41,8 @@ MaaEnd 的节点测试只有全量入口 `pnpm test`（`maa-tools test`），没
 **一个文件一个进程（第一版做法）。** 判定粒度最细、实现最简单，但固定开销按文件数重复：45 个文件实测要 3~4 分钟。批量跑之后同样的量十几秒，代价只是「失败定位到文件、定位不到用例」，而这一点本来就是整文件运行的既有边界。
 
 **并行跑多个单文件进程（限制并发 2~4）。** 不改契约，但每个进程都要自己加载 MaaFW 与 ONNX/OpenCV，内存翻几倍；而且 `runTest` 内部已经用 worker 池按 CPU 并行，外面再叠一层并行收益很低、互相抢 CPU。
+
+**解析 maa-tools 打印的失败文本行（`  <图> <节点> should hit but missed`）来定位用例。** 也能做，但要自己写正则去啃四类文案（`missing detail.`、`should hit but missed`、`box mismatch. Expect …`、`should missed but hit`），而且拿不到算法名和识别框数值——`error_details.json` 里这些都是结构化字段。文本解析只在日志里给人看，机器判定一律走明细文件。
 
 **直接调 maa-tools 的全量 `test`（不过滤）。** 一次进程、改动最小，但它会跑本不该跑的用例（用户只选了一个目录），而且同样拿不到我们需要的归属关系，还得多写一层「哪些文件属于这次选择」的反推。
 

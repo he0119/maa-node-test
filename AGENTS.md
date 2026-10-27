@@ -40,16 +40,16 @@ node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
 | `src/extension.ts` | 只做装配：输出面板、两个 provider、四个命令、测试面板 |
 | `src/config.ts` | 读三个设置项、认定哪个工作区文件夹是仓库根 |
 | `src/runner.ts` | 起 runner 进程、收输出、按退出码提示（CodeLens / 命令走这条） |
-| `src/testing.ts` | 测试面板：发现用例、运行顺序、退出码 → 通过/失败/未运行 |
+| `src/testing.ts` | 测试面板：发现用例、运行顺序、把结论行标记成通过/失败/未运行 |
 | `src/providers/` | CodeLens 与 hover 的薄适配层，只做 vscode 类型转换 |
-| `src/core/` | 纯函数：解析测试文件、扫截图、拼 hover 文本、拼命令参数。**不许 import vscode** |
-| `runner/run-single-test.mjs` | 独立 ESM 脚本：只跑一个文件或一条用例，也可以直接在终端里跑 |
+| `src/core/` | 纯函数：解析测试文件、扫截图、拼 hover 文本、拼命令参数、解析结论行与失败文案。**不许 import vscode** |
+| `runner/run-single-test.mjs` | 独立 ESM 脚本：跑一批文件或其中一条用例，也可以直接在终端里跑 |
 | `runner/lib/` | runner 的纯函数与单测 |
 
 ## 硬约束
 
 1. **`src/core/` 不许 import `vscode`**：这一层的价值就是能在普通 Node 里单测，混进 vscode 就废了。
-2. **runner 的命令行、`RESULT-FILE` 行与退出码是契约**，扩展和 runner 分别维护，任何一侧改动都要同步：`runner/lib/args.mjs`（参数）、`runner/lib/results.mjs`（`RESULT-FILE` 格式与判定）、`src/core/runnerArgs.ts`（拼参数）、`src/testing.ts`（解析 `RESULT-FILE` 与退出码映射），外加 README 的表格和 `reference.md`。
+2. **runner 的命令行、`RESULT-FILE` 行与退出码是契约**，扩展和 runner 分别维护，任何一侧改动都要同步：`runner/lib/args.mjs`（参数）、`runner/lib/results.mjs`（`RESULT-FILE` / `RESULT-CASE` 格式与判定）、`src/core/runnerArgs.ts`（拼参数）、`src/core/testResult.ts`（解析结论行与失败文案）、`src/testing.ts`（把结论标记到面板节点），外加 `reference.md` 的契约段（README 只写用法，不放契约）。
 3. **不要写死平台名**（`Win32` / `ADB` / `Official_CN`）：平台与资源目录一律从测试集目录扫描得到，新加控制器才不用改代码。
 4. **hover 里的图片用 Markdown 图片语法**（`![](file:///…)`），不用 HTML `<img>`：Markdown 语法在悬浮里稳定可见，HTML 会被过滤规则牵着走。
 5. **`.code-workspace` 必须保持纯 JSON**（不带尾逗号），它已在 `.prettierignore` 里，别为了「格式化」把它改坏。
@@ -57,10 +57,11 @@ node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
 
 ## 调试时窗口的工作区必须是 MaaEnd
 
-插件要读 MaaEnd 的 `maatools.config.mts`、`tests/` 和截图；工作区不对就只能看到空测试面板。三种调试方式见 [README「安装（开发态）」](README.md#安装开发态)，推荐打开 `maa-node-test.code-workspace`（MaaEnd 主工作区 + 插件源码两个文件夹）。
+插件要读 MaaEnd 的 `maatools.config.mts`、`tests/` 和截图；工作区不对就只能看到空测试面板。三种调试方式见 [README「装（开发态）」](README.md#装开发态)，推荐打开 `maa-node-test.code-workspace`（MaaEnd 主工作区 + 插件源码两个文件夹）。
 
 ## 改了东西之后
 
-- 行为、设置项、限制有变化：同步 `README.md`；
+- 行为、设置项、限制有变化：同步 `README.md`（它面向使用者，只写「怎么用、怎么排错」）；
+- 契约、内部机制有变化：同步 `reference.md`（面向改代码的人）；
 - 契约或设计有变化：更新对应的 [Agent Note](.agents/notes/README.md)，不要新开一份重复的；
 - 提交信息用中文约定式提交（`feat:` / `fix:` / `chore:` / `docs:` / `refactor:`，可带 scope），一次提交讲一件事。

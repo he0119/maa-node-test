@@ -19,6 +19,7 @@
 | `core/hover.ts` | 拼 hover 的 Markdown 正文（绝对路径→URI 由回调注入，不 import vscode） |
 | `core/lens.ts` | 生成 CodeLens 描述 + 命令 id 常量 |
 | `core/runnerArgs.ts` | 拼 runner 参数、拼可打印命令行、拼运行标题 |
+| `core/testResult.ts` | 解析 `RESULT-FILE:` / `RESULT-CASE:` 行、退出码映射、失败文案（短标题 + 明细列表）、拼 Markdown |
 | `core/testExplorer.ts` | 把测试文件翻成测试面板的树描述（id、label、description、range）；`folderSegments()` 决定目录分组层级 |
 
 ### `runner/`
@@ -30,7 +31,7 @@
 | `lib/test-file.mjs` | 读目标文件（jsonc）、结构规整、`buildTarget`（`--case` 越界抛专用错误） |
 | `lib/case-key.mjs` | 用例键 = `<图片名>\|<命中节点按字典序去重后逗号连接>`；`hits` 支持字符串与 `{node, box}` |
 | `lib/filter.mjs` | `filterGroupsForFiles()` 批量过滤（不就地改入参）：留下目标文件的组和用例，并给出「组名 → 哪些文件」的归属；`filterGroups()` 是单文件版本 |
-| `lib/results.mjs` | 从 maa-tools 的输出里逐组判定通过/失败，再按归属汇总成逐文件结论；`RESULT-FILE:` 行格式也在这里 |
+| `lib/results.mjs` | 从 maa-tools 的输出里逐组判定通过/失败，再按归属汇总成逐文件结论；`RESULT-FILE:` / `RESULT-CASE:` 行格式也在这里；`locateCaseFailures()` 把 `error_details.json` 的条目分发到具体用例下标 |
 | `lib/images.mjs` | 截图路径（与 `runTest` 内算法逐字一致）、存在性扫描、统计 |
 | `lib/png.mjs` | 读 PNG 头拿宽高 |
 | `lib/paths.mjs` | 相对仓库根解析路径、日志里显示相对路径 |
@@ -74,10 +75,34 @@ node runner/run-single-test.mjs \
 - `--file` 可以重复：多个文件就是**批量跑**，一次进程跑完，省掉每个文件重新准备 MaaFW 的固定开销。
 - 不传 `--case`：跑目标文件里的全部用例；批量跑时不允许带 `--case`（下标含义会歧义）。
 - `--dry-run`：只解析、过滤、检查截图，打印计划；不加载 MaaFW、不执行识别。
-- stdout 是人话日志，随后是**逐文件结论** `RESULT-FILE: <相对路径> pass|fail|error`，**最后一行固定** `RESULT: pass|fail|error|empty`；退出码与最后一行一致。
+- stdout 是人话日志，随后是**逐用例结论** `RESULT-CASE: {json}`（只打失败和被跳过这两类）、**逐文件结论** `RESULT-FILE: <相对路径> pass|fail|error`，**最后一行固定** `RESULT: pass|fail|error|empty`；退出码与最后一行一致。
+- 逐用例行 `RESULT-CASE` 的载荷是 `{"file","case","verdict","title","detail":[...]}`：`title` 是面板节点上显示的那一行短标题（例如 `CloudADB-官服 失败`），`detail` 是展开后逐条列出的明细（节点、原因、截图、哪些平台通过）。用 JSON 是因为原因里带空格、逗号和反引号。
+- 逐用例原因来自 maa-tools 写的 `cfg.test.errorDetailsPath`（MaaEnd 里是 `tests/maatools/error_details.json`）：条目含 `imagePath`、`node`、`hit`、`detail.{algorithm, box}`。**只有本次运行更新过这个文件才采信**（比 mtime），否则宁可没有原因，也不张冠李戴。
 - 逐文件结论怎么来的：`runTest` 只返回整批一个布尔值，所以跑的时候把 stdout 抄一份，按「组名行 = 该组开始、行首两空格 = 该组有失败明细」判定每组，再按 `owners`（组名 → 文件）分发到文件。相关纯函数都在 `lib/results.mjs`，有单测。
 - 文件级结论还会被两条规则覆盖成 `error`：该文件一张截图都不存在、或它在过滤后一个组都没匹配到 —— 这两种情况下「通过」是假的。
 - 脚本自己不做「静默降级」：缺少 `--workspace`/`--file`、配置文件加载失败、目标文件不存在、截图一张都不存在、MaaFW 起不来，全部按前置错误报出来。
+
+## 为什么一批文件合成一次进程
+
+`runTest` 的固定开销（配置加载、`setupMaa` 准备 MaaFW、加载 `assets/`）按进程算，跟跑了几个文件无关。实测本机（8 核、maa-tools 默认 2 个 worker）：
+
+| 场景 | 耗时 |
+| --- | --- |
+| dry-run（只加载配置 + 过滤 + 检查截图，不跑识别） | 0.56 秒 |
+| 单个文件（2~3 条用例） | 4~5 秒 |
+| 10 个文件（Common/Button 全目录）批量 | 5.3 秒 |
+| 同 10 个文件逐个进程跑 | 约 45 秒 |
+| 全仓 47 个文件 / 1491 个识别任务，批量 | 与 `pnpm test` 同量级（同一批任务、同样 worker 数） |
+
+所以逐文件起进程时，几十个文件里有 2~3 分钟是纯重复开销；合成一批后这份开销只付一次。代价是逐用例结论要靠解析输出和错误明细（见下一节），单条用例仍然单独起进程以保证精确。
+
+## 逐用例结论怎么产生
+
+1. 跑的时候把 stdout 抄一份，按「组名行 = 该组开始、行首两个空格 = 该组有失败明细」判定每组通过与否（`attributeGroupResults()`）；
+2. 过滤阶段就记了 `owners`（组名 → 哪些文件），据此把组结论分发到文件（`aggregateFileResults()`）；
+3. 逐用例原因读 `error_details.json`（`imagePath`、`node`、`hit`、`detail.{algorithm, box}`），用「组的 `imageRoot` + 用例图片名」推期望路径去匹配条目，再用**用例自己写的期望**重判一遍（该命中没命中 / 不该命中却命中 / 框超出范围），并顺带统计这条用例在哪些平台跑过、哪些失败、哪些缺图（`locateCaseFailures()` + `formatCaseFailure()`）。
+
+只有本次运行确实更新过 `error_details.json` 才采信（比 mtime），否则宁可没有原因，也不张冠李戴。
 
 ## 退出码 → 扩展行为
 
@@ -85,7 +110,7 @@ node runner/run-single-test.mjs \
 | --- | --- | --- | --- |
 | `0` | 全部用例通过 / dry-run 有匹配 | 弹「通过」提示（dry-run 不弹） | 标记 passed |
 | `1` | 有用例断言失败 | 弹「失败」+「打开错误详情」按钮 | 标记 failed，提示看输出与 `error_details.json` |
-| `2` | 前置错误（参数、配置、截图全缺、MaaFW） | 弹「没能跑起来」+「查看输出」 | 标记 **errored**（不是 failed） |
+| `2` | 前置错误（参数、配置、截图全缺、MaaFW） | 弹「没能跑起来」+「查看输出」 | 标记 **errored**（不是 failed）；有逐用例失败行时仍按行标记 |
 | `3` | 过滤后没有可跑用例 | 弹「没有匹配到任何用例」+「查看输出」 | 标记 errored，提示查 loader 映射 |
 | `null` | 进程没起来或被杀 | 弹「没能跑起来」，提示查 `nodePath` | 标记 errored / skipped |
 
@@ -138,7 +163,8 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 - **运行**：`collectTargets()` 递归遍历选中的节点 —— 没有 `include`（Run All）时取全部叶子；目录节点展开成它下面所有文件；文件节点就是它自己；用例节点只跑那一条。同一文件既有整文件又有单用例时，整文件优先去重。结果分成两类：**文件级目标合成一次进程**（解析 `RESULT-FILE` 行逐文件标记），**用例级目标各自一次进程**（退出码即结论）。
 - **串行**：多个目标用一个 promise 队列逐个跑，避免同时起一堆 MaaFW。
 - **取消**：`CancellationToken` → `process.cancel()`，被取消的标 skipped。
-- **整文件运行**：进程只给一个总结果，所以文件和它的子用例统一标记；失败信息提示「展开后单跑以定位」。
+- **结果标记**：文件节点用 `**短标题**` + Markdown 列表（明细来自 `RESULT-CASE`）；有逐用例信息时子用例各按自己的结论标记，没被点名的按通过处理；一条逐用例信息都没有时，子用例跟随文件结论。
+- **单条用例运行**：各自一次进程，退出码即结论，失败文案同样优先用 `RESULT-CASE` 给的原因。
 
 ## 设置项
 
@@ -158,4 +184,63 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 | `src/core/lens.test.ts` | CodeLens 条数与命令参数 |
 | `src/core/runnerArgs.test.ts` | 参数拼装（有/无 `--case`、`--dry-run`）、命令行转义、标题 |
 | `src/core/testExplorer.test.ts` | 测试面板节点 label 回退、id 稳定、range 覆盖用例对象 |
-| `runner/lib/*.test.mjs` | 用例键、过滤四条规则、参数非法输入、`--case` 越界、截图路径与统计、PNG、RESULT 映射 |
+| `src/core/testResult.test.ts` | 结论行解析、坏载荷、退出码映射、文件/用例文案、Markdown 列表 |
+| `runner/lib/*.test.mjs` | 用例键、过滤四条规则（含批量归属）、参数非法输入、`--case` 越界、截图路径与统计、PNG、RESULT 映射、逐用例失败分类与平台统计 |
+
+## 目录结构
+
+```text
+maa-node-test/
+├─ package.json          # 扩展清单：命令、设置项、激活事件
+├─ tsconfig.json
+├─ src/
+│  ├─ extension.ts       # 只做装配：输出面板、provider、命令
+│  ├─ config.ts          # 读设置、解析仓库根
+│  ├─ runner.ts          # 起 runner 进程、收输出、按退出码提示
+│  ├─ testing.ts         # 测试面板：发现用例、运行、结果标记
+│  ├─ providers/         # CodeLens 与 hover 的薄适配层
+│  └─ core/              # 纯函数：解析测试文件、扫截图、拼 hover 文本、拼参数、解析结论行
+└─ runner/
+   ├─ run-single-test.mjs # 入口：一批文件或其中一条用例
+   └─ lib/                # 参数、用例键、过滤、结果判定、截图预检、PNG 尺寸、退出码
+```
+
+`src/core/` 不 import `vscode`，所以能直接在 Node 里跑单测；`runner/` 是独立的 ESM 脚本，不依赖插件进程，也能在终端里手动跑。
+
+## 自查命令
+
+```bash
+pnpm run check        # 类型检查（tsc --noEmit）
+pnpm run compile      # 编译到 out/
+pnpm test             # 扩展纯函数单测
+pnpm run test:runner  # runner 单测
+pnpm run test:all     # 上面三件事一起
+```
+
+格式化沿用 MaaEnd 仓库的 prettier 配置（本仓库不重复写一份）：
+
+```bash
+~/dev/MaaEnd/node_modules/.bin/prettier --config ~/dev/MaaEnd/.prettierrc.mjs \
+  --write "package.json" "tsconfig.json" ".vscode/*.json" "src/**/*.ts" "runner/**/*.mjs"
+~/dev/MaaEnd/node_modules/.bin/markdownlint .
+```
+
+`maa-node-test.code-workspace` 刻意排除在格式化之外（`.prettierignore` 里有说明）：它是纯 JSON，不能带尾逗号。
+
+手动在终端里跑（不加载 MaaFW，几秒出结果）：
+
+```bash
+node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
+  --file tests/Common/Button/test_close_button.json --dry-run
+```
+
+真实跑一条用例，或者批量跑一个目录：
+
+```bash
+node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
+  --file tests/DeliveryJobs/test_region.json --case 0
+
+node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
+  --file tests/Common/Button/test_close_button.json \
+  --file tests/Common/Button/test_change_region_button.json
+```
