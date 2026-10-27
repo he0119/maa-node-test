@@ -50,7 +50,19 @@ export function buildImageHoverMarkdown(input: ImageHoverInput, toUriString: (ab
     for (const location of input.locations) {
         blocks.push(describeLocation(location, toUriString, imageWidth));
     }
+
+    // 声明了但测试集里连平台目录都没有：这种最容易被忽略 —— 上面按目录扫描，压根不会出现它
+    for (const controller of declaredButAbsent(input)) {
+        blocks.push(`**${controller}** · \`${input.testsetLabel}\` 下没有这个平台的目录`);
+    }
+
     return blocks.join("\n\n");
+}
+
+/** 本文件声明了、但测试集里没扫到的平台（名字对不上或目录缺失） */
+function declaredButAbsent(input: ImageHoverInput): string[] {
+    const scanned = new Set(input.locations.map((location) => location.platform));
+    return [...new Set(input.controllers)].filter((controller) => !scanned.has(controller));
 }
 
 function describeFound(foundCount: number, totalCount: number, testsetLabel: string): string {

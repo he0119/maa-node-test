@@ -8,6 +8,7 @@ import {
     formatCaseResultLine,
     locateCaseFailures,
     parseCaseResultLine,
+    summarizePlatforms,
     attributeGroupResults,
     formatFileResultLine,
     hasAnyAttributedGroup,
@@ -494,4 +495,60 @@ test("缺图：某个平台缺图、别的平台通过时，说清哪边没验�
     assert.equal(text.title, "CloudADB-官服 没验证到");
     assert.ok(text.lines.some((line) => /截图不存在/.test(line)));
     assert.ok(text.lines.some((line) => /这条用例没有真正验证/.test(line)));
+});
+
+test("平台覆盖：按平台统计截图数和缺图数", () => {
+    const win32 = {
+        configs: {controller: "Win32", resource: "官服"},
+        cases: [
+            {image: "a.png"},
+            {image: "b.png"},
+        ],
+    };
+    const cloud = {configs: {controller: "CloudADB", resource: "官服"}, cases: [{image: "a.png"}]};
+    const entries = [
+        {
+            key: "tests/a.json",
+            target: {
+                controllers: [
+                    "Win32",
+                    "CloudADB",
+                ],
+            },
+        },
+    ];
+
+    const summary = summarizePlatforms({
+        groups: [
+            win32,
+            cloud,
+        ],
+        entries,
+        isImageMissing: (group) => group.configs.controller === "CloudADB",
+    });
+
+    assert.deepEqual(summary.platforms, [
+        {label: "Win32-官服", controller: "Win32", images: 2, missing: 0},
+        {label: "CloudADB-官服", controller: "CloudADB", images: 1, missing: 1},
+    ]);
+    assert.deepEqual(summary.unmatched, []);
+});
+
+test("平台覆盖：声明了但没有匹配到组的 controller 会被点出来", () => {
+    const win32 = {configs: {controller: "Win32", resource: "官服"}, cases: [{image: "a.png"}]};
+    const entries = [
+        {
+            key: "tests/a.json",
+            target: {
+                controllers: [
+                    "Win32",
+                    "ADB",
+                ],
+            },
+        },
+    ];
+
+    const summary = summarizePlatforms({groups: [win32], entries, isImageMissing: () => false});
+
+    assert.deepEqual(summary.unmatched, [{file: "tests/a.json", controller: "ADB"}]);
 });

@@ -174,3 +174,22 @@ test("预览图宽度：非 16:9 的图也按比例算高度", () => {
     );
     assert.ok(markdown.includes(`width="200" height="356"`));
 });
+
+test("hover 文本：声明了但测试集里没有这个平台目录时，单独点出来", () => {
+    const markdown = buildImageHoverMarkdown(
+        {
+            imageName: "帝江号_大世界.png",
+            controllers: [
+                "Win32",
+                "CloudADB",
+            ],
+            testsetLabel: TESTSET_LABEL,
+            testsetExists: true,
+            locations: [found("Win32", "Official_CN", WANG32_PNG, 1280, 720)],
+        },
+        toUri,
+    );
+
+    // 扫描只会扫到存在的平台目录，声明了却不存在的必须显式提一句，否则会被当成「没这回事」
+    assert.ok(markdown.includes(`**CloudADB** · \`${TESTSET_LABEL}\` 下没有这个平台的目录`));
+});

@@ -17,6 +17,19 @@ export interface CaseVerdict {
     detail: string[];
 }
 
+/** 一条用例最终要标成什么，以及悬停时显示什么 */
+export interface CaseMark {
+    caseIndex?: number;
+    verdict: FileVerdict;
+    text: VerdictText;
+}
+
+/** 一次文件级运行要打给面板的全部标记 */
+export interface FileMarking {
+    file: {verdict: FileVerdict; text: VerdictText};
+    cases: CaseMark[];
+}
+
 /** 一段给人看的文案：短标题 + 展开后的列表项 */
 export interface VerdictText {
     title: string;
@@ -135,6 +148,65 @@ export function describeFileFailure(
         for (const line of entry.info?.detail ?? []) detail.push(`    ${line}`);
     }
     return {title: `${failing.length} 条用例失败`, detail};
+}
+
+/**
+ * 决定文件节点和各条用例分别标成什么。
+ *
+ * 关键的一条：**文件「通过」不代表每条用例都被验证过**。声明的某个平台缺截图时，maa-tools 会跳过
+ * 那一条用例并当作通过，整个文件也就没有断言失败 —— 但那条用例其实什么也没验证。所以这里不允许
+ * 「文件通过 → 子用例全绿」，只要有用例没验证到，文件就标成 errored 并把缺图平台写出来。
+ */
+export function planFileMarking(
+    relativePath: string,
+    verdict: FileVerdict,
+    cases: readonly {caseIndex?: number; info?: CaseVerdict}[],
+): FileMarking {
+    const problems = cases.filter((entry) => entry.info !== undefined && entry.info.verdict !== "pass");
+
+    if (verdict === "pass" && problems.length === 0) {
+        return {
+            file: {verdict: "pass", text: {title: "通过", detail: []}},
+            cases: cases.map((entry) => ({
+                caseIndex: entry.caseIndex,
+                verdict: "pass",
+                text: {title: "通过", detail: []},
+            })),
+        };
+    }
+
+    // 文件本身没有断言失败，但有用例没验证到（缺图）或（理论上）有用例失败
+    if (verdict === "pass") {
+        const hasFailure = problems.some((entry) => entry.info?.verdict === "fail");
+        const detail: string[] = [];
+        for (const entry of problems) {
+            detail.push(`第 ${formatIndex(entry.caseIndex)} 个用例 · ${entry.info?.title ?? "没验证到"}`);
+            for (const line of entry.info?.detail ?? []) detail.push(`    ${line}`);
+        }
+        return {
+            file: {
+                verdict: hasFailure ? "fail" : "error",
+                text: {
+                    title: hasFailure ? "有用例失败" : `${problems.length} 条用例没有验证到`,
+                    detail,
+                },
+            },
+            cases: cases.map((entry) => markOfCase(entry, "pass")),
+        };
+    }
+
+    const fileText = describeFileFailure(relativePath, verdict, cases);
+    return {
+        file: {verdict, text: fileText},
+        // 有逐用例信息的按自己的结论标；没被点名的说明它确实通过了；一条信息都没有时跟随文件结论
+        cases: cases.map((entry) => markOfCase(entry, problems.length === 0 ? verdict : "pass")),
+    };
+}
+
+/** 单条用例的标记：有结论就用自己的，没有就用 fallback */
+function markOfCase(entry: {caseIndex?: number; info?: CaseVerdict}, fallback: FileVerdict): CaseMark {
+    if (entry.info) return {caseIndex: entry.caseIndex, verdict: entry.info.verdict, text: entry.info};
+    return {caseIndex: entry.caseIndex, verdict: fallback, text: {title: "通过", detail: []}};
 }
 
 /**

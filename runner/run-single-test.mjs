@@ -34,6 +34,7 @@ import {
     locateCaseFailures,
     normalizeFileResults,
     overallVerdict,
+    summarizePlatforms,
 } from "./lib/results.mjs";
 import {
     CaseIndexOutOfRangeError,
@@ -187,6 +188,8 @@ async function run() {
     const scan = scanImages(cfg, groups);
     const stats = countImages(scan);
     const perFile = summarizePerFile(scan, owners, entries);
+
+    printPlatformCoverage(scan, groups, entries);
 
     if (args.dryRun) {
         printPlan(scan);
@@ -424,6 +427,39 @@ function summarizePerFile(scan, owners, entries) {
     }
 
     return summary;
+}
+
+/**
+ * 平台覆盖：每个平台这次涉及多少张截图、缺几张；以及声明了却没有匹配到组的 controller。
+ * 缺图这件事必须让人一眼看到 —— maa-tools 会把缺图的用例跳过并当作通过。
+ */
+function printPlatformCoverage(scan, groups, entries) {
+    const summary = summarizePlatforms({
+        groups,
+        entries,
+        isImageMissing: (group, testCase) => {
+            const item = scan.find((entry) => entry.group === group);
+            const index = group.cases.indexOf(testCase);
+            return item ? !item.images[index].exists : false;
+        },
+    });
+
+    if (summary.platforms.length === 0) return;
+
+    console.log("");
+    console.log("平台覆盖：");
+    for (const item of summary.platforms) {
+        const state = item.missing === 0 ? "全部存在" : `缺 ${item.missing} 张（这些用例在这个平台上跳过，等于没验证）`;
+        console.log(`  ${item.label}：${item.images} 张截图，${state}`);
+    }
+
+    if (summary.unmatched.length > 0) {
+        console.log("");
+        console.log("声明了但没有匹配到测试组的平台（这些平台一条用例都没跑）：");
+        for (const item of summary.unmatched) {
+            console.log(`  ${item.controller}（${item.file}）—— 检查 tests/scripts/loader.mts 里 controller 的映射`);
+        }
+    }
 }
 
 /** dry-run 的计划：每组、每个用例、截图与命中节点都列清楚。 */

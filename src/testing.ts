@@ -6,10 +6,10 @@ import {isTestFilePath, parseTestDocument} from "./core/document";
 import {buildBatchRunTitle, buildRunTitle} from "./core/runnerArgs";
 import {
     buildMessageMarkdown,
+    planFileMarking,
     caseKeyOf,
     collectCaseVerdict,
     collectFileVerdict,
-    describeFileFailure,
     describeVerdict,
     fallbackVerdict,
     verdictFromExitCode,
@@ -391,36 +391,22 @@ export class NodeTestExplorer implements vscode.Disposable {
                 return {item, info, caseIndex: leaf?.caseIndex};
             },
         );
-        const knownCases = cases.filter((entry) => entry.info !== undefined);
 
-        if (verdict === "pass") {
-            testRun.passed(target.item, duration);
-            for (const entry of cases) testRun.passed(entry.item, duration);
-            return;
-        }
+        // 标记规则在 core 里（纯函数，可单测）：文件通过不代表每条用例都验证过
+        const marking = planFileMarking(
+            target.relativePath,
+            verdict,
+            cases.map((entry) => ({caseIndex: entry.caseIndex, info: entry.info})),
+        );
 
-        const fileText = describeFileFailure(target.relativePath, verdict, knownCases);
-        const fileMessage = buildTestMessage(fileText.title, fileText.detail);
-        if (verdict === "fail") testRun.failed(target.item, fileMessage, duration);
-        else testRun.errored(target.item, fileMessage, duration);
-
+        applyMark(testRun, target.item, marking.file.verdict, marking.file.text, duration);
         for (const entry of cases) {
-            const info = entry.info;
-            if (info) {
-                const caseMessage = buildTestMessage(info.title, info.detail);
-                if (info.verdict === "fail") testRun.failed(entry.item, caseMessage, duration);
-                else if (info.verdict === "error") testRun.errored(entry.item, caseMessage, duration);
-                else testRun.passed(entry.item, duration);
+            const caseMark = marking.cases.find((candidate) => candidate.caseIndex === entry.caseIndex);
+            if (!caseMark) {
+                testRun.skipped(entry.item);
                 continue;
             }
-
-            // 没有任何逐用例信息时跟随文件结论；有信息但这条没被点名，说明它确实通过了
-            if (knownCases.length === 0) {
-                if (verdict === "fail") testRun.failed(entry.item, fileMessage, duration);
-                else testRun.errored(entry.item, fileMessage, duration);
-            } else {
-                testRun.passed(entry.item, duration);
-            }
+            applyMark(testRun, entry.item, caseMark.verdict, caseMark.text, duration);
         }
     }
 
@@ -534,6 +520,23 @@ export function collectTargets(
         ...fileTargets.values(),
         ...deduped,
     ];
+}
+
+/** 按结论把节点标成通过 / 失败 / 没验证到 */
+function applyMark(
+    testRun: vscode.TestRun,
+    item: vscode.TestItem,
+    verdict: FileVerdict,
+    text: {title: string; detail: readonly string[]},
+    duration: number,
+): void {
+    if (verdict === "pass") {
+        testRun.passed(item, duration);
+        return;
+    }
+    const message = buildTestMessage(text.title, text.detail);
+    if (verdict === "fail") testRun.failed(item, message, duration);
+    else testRun.errored(item, message, duration);
 }
 
 /** 面板里的失败信息：标题用粗体一行，明细用列表（MarkdownString 才会按 Markdown 渲染） */

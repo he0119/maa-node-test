@@ -352,6 +352,45 @@ function unique(items) {
     return [...new Set(items)];
 }
 
+/**
+ * 按平台统计这次到底跑了什么：每个平台多少张截图、缺几张，
+ * 以及「测试文件声明了、但过滤后一个组都没匹配到」的 controller。
+ *
+ * 后一种情况最难发现：controller 写错、或 loader 没映射它，用例会静默地一条都不跑。
+ */
+export function summarizePlatforms({groups, entries, isImageMissing}) {
+    const platforms = new Map();
+    for (const group of groups) {
+        const label = `${group?.configs?.controller ?? "?"}-${group?.configs?.resource ?? "?"}`;
+        const slot = platforms.get(label) ?? {
+            label,
+            controller: group?.configs?.controller ?? "?",
+            images: 0,
+            missing: 0,
+        };
+        for (const testCase of group.cases) {
+            slot.images += 1;
+            if (isImageMissing(group, testCase)) slot.missing += 1;
+        }
+        platforms.set(label, slot);
+    }
+
+    const matchedControllers = new Set(groups.map((group) => group?.configs?.controller));
+    const unmatched = [];
+    const seen = new Set();
+    for (const entry of entries) {
+        for (const controller of entry.target.controllers) {
+            if (matchedControllers.has(controller)) continue;
+            const key = `${entry.key}#${controller}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            unmatched.push({file: entry.key, controller});
+        }
+    }
+
+    return {platforms: [...platforms.values()], unmatched};
+}
+
 /** 一条用例是否需要报出来（有失败或缺图） */
 export function hasCaseProblem(info) {
     return info.failures.length > 0 || info.missing.length > 0;

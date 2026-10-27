@@ -78,6 +78,7 @@ node runner/run-single-test.mjs \
 - stdout 是人话日志，随后是**逐用例结论** `RESULT-CASE: {json}`（只打失败和被跳过这两类）、**逐文件结论** `RESULT-FILE: <相对路径> pass|fail|error`，**最后一行固定** `RESULT: pass|fail|error|empty`；退出码与最后一行一致。
 - 逐用例行 `RESULT-CASE` 的载荷是 `{"file","case","verdict","title","detail":[...]}`：`title` 是面板节点上显示的那一行短标题（例如 `CloudADB-官服 失败`），`detail` 是展开后逐条列出的明细（节点、原因、截图、哪些平台通过）。用 JSON 是因为原因里带空格、逗号和反引号。
 - 逐用例原因来自 maa-tools 写的 `cfg.test.errorDetailsPath`（MaaEnd 里是 `tests/maatools/error_details.json`）：条目含 `imagePath`、`node`、`hit`、`detail.{algorithm, box}`。**只有本次运行更新过这个文件才采信**（比 mtime），否则宁可没有原因，也不张冠李戴。
+- 运行日志里有一块「平台覆盖」：每个平台涉及多少张截图、缺几张，以及声明了却没有匹配到测试组的 controller（后者多半是 controller 名字写错或 loader 没映射）。缺图必须在日志里显式出现 —— 否则「跳过即通过」会被误读成没问题。
 - 逐文件结论怎么来的：`runTest` 只返回整批一个布尔值，所以跑的时候把 stdout 抄一份，按「组名行 = 该组开始、行首两空格 = 该组有失败明细」判定每组，再按 `owners`（组名 → 文件）分发到文件。相关纯函数都在 `lib/results.mjs`，有单测。
 - 文件级结论还会被两条规则覆盖成 `error`：该文件一张截图都不存在、或它在过滤后一个组都没匹配到 —— 这两种情况下「通过」是假的。
 - 脚本自己不做「静默降级」：缺少 `--workspace`/`--file`、配置文件加载失败、目标文件不存在、截图一张都不存在、MaaFW 起不来，全部按前置错误报出来。
@@ -156,6 +157,7 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 - 一个都没找到时只给一句人话提示（「没有任何平台包含 xxx.png…」），不铺空表格；
 - URI 里的括号要转义成 `%28`/`%29`，否则文件名带括号时链接会断。
 - **图片用 `<img>` 才能控制尺寸**：Markdown 图片语法没法指定大小，1280×720 会按原样铺开，占掉大半个悬浮框。宽度取 `maaNodeTest.hoverImageWidth`（默认 400），高度按 PNG 原比例算（读不出尺寸就不写 `height`）。用 HTML 的前提是 provider 里 `MarkdownString.supportHtml = true`，这个已经设了。
+- **声明了但扫描不到的平台要单独写出**：扫描只列存在的平台目录，本文件 `configs.controller` 里有、测试集里没有的，会补一行「`<testsetDir>` 下没有这个平台的目录」。名字对不上（loader 里的映射和目录名不同）也会落到这一行，这是有意的：宁可多一句提示，也不要静默忽略。
 - 把宽度设成 `0` 会回落到 `![](uri)` 的 Markdown 语法 —— 这是留给「某天 HTML 渲染出问题」的开关，别删。
 
 ## 测试面板语义
@@ -166,6 +168,7 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 - **串行**：多个目标用一个 promise 队列逐个跑，避免同时起一堆 MaaFW。
 - **取消**：`CancellationToken` → `process.cancel()`，被取消的标 skipped。
 - **结果标记**：文件节点用 `**短标题**` + Markdown 列表（明细来自 `RESULT-CASE`）；有逐用例信息时子用例各按自己的结论标记，没被点名的按通过处理；一条逐用例信息都没有时，子用例跟随文件结论。
+- **「文件通过」不等于「每条都验证过」**：声明的平台缺图时 maa-tools 会跳过该用例并判通过，文件也就没有断言失败。所以标记规则单独抽成了 `core/testResult.ts` 的 `planFileMarking()`：只要有用例没验证到，文件节点标成 errored（标题「N 条用例没有验证到」），子用例各自标 —— 不允许「文件通过 → 子用例全绿」。
 - **单条用例运行**：各自一次进程，退出码即结论，失败文案同样优先用 `RESULT-CASE` 给的原因。
 
 ## 换一个仓库来用要改什么
