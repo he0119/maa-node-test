@@ -19,7 +19,8 @@
 | `core/hover.ts` | 拼 hover 的 Markdown 正文（绝对路径→URI 由回调注入，不 import vscode） |
 | `core/lens.ts` | 生成 CodeLens 描述 + 命令 id 常量 |
 | `core/runnerArgs.ts` | 拼 runner 参数、拼可打印命令行、拼运行标题 |
-| `core/testResult.ts` | 解析 `RESULT-FILE:` / `RESULT-CASE:` 行、退出码映射、失败文案（短标题 + 明细列表）、拼 Markdown |
+| `core/testResult.ts` | 解析 `RESULT-FILE:` / `RESULT-CASE:` 行、退出码映射、失败文案（短标题 + 明细列表）、拼 Markdown、`planFileMarking()` 决定每个节点标什么 |
+| `core/missingImages.ts` | 探测阶段查缺图：哪些声明平台没有这张截图、平台目录是否压根不存在，以及对应的诊断文案 |
 | `core/testExplorer.ts` | 把测试文件翻成测试面板的树描述（id、label、description、range）；`folderSegments()` 决定目录分组层级 |
 
 ### `runner/`
@@ -163,6 +164,8 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 ## 测试面板语义
 
 - **发现**：`findFiles` 扫 `test_*.json` 与 `test_*.jsonc`，按 `isTestFilePath()` 过滤；按相对路径排序后用 `folderSegments()` 建「目录 → 文件 → 用例」三层树（`tests` 这层省略，目录灰字是「含 N 个测试文件」）。JSON 坏掉的跳过并 `console.warn`，不影响整个面板。保存文件后 300ms 防抖刷新。
+- **探测阶段就报缺图**（`reportMissingImages()` + `core/missingImages.ts`）：刷新时对每个用例算「本文件声明的平台里，哪些没有这张截图」，然后（1）在 `image` 值上画 Warning 级诊断（`DiagnosticCollection("maaNodeTest")`），（2）把「缺 ADB、CloudADB 截图」拼进用例节点的 description。这样写用例的时候就知道声明了却没截图，不用等跑完 —— 跑完 maa-tools 会把缺图的用例当通过。整个扫描对 48 个测试文件实测约 60ms（同一图片名的扫描结果按名字缓存），可以放心跟着刷新走。
+- 缺图诊断只判断「某些声明平台没有这张图」，不做资源服（`Official_CN` 之类）的匹配 —— 测试集的一级目录是平台，二级目录是资源，而用例声明的 `configs.resource` 是显示名（`官服`），两者没有对应关系可依赖。
 - **节点的身份**：每个叶子节点（文件、用例）登记在 `leaves: Map<id, {filePath, relativePath, caseIndex?}>` 里，运行时只认这张表，不靠解析 id 字符串 —— 目录节点因此不需要挂 uri，也不会被误当成可运行的东西。
 - **运行**：`collectTargets()` 递归遍历选中的节点 —— 没有 `include`（Run All）时取全部叶子；目录节点展开成它下面所有文件；文件节点就是它自己；用例节点只跑那一条。同一文件既有整文件又有单用例时，整文件优先去重。结果分成两类：**文件级目标合成一次进程**（解析 `RESULT-FILE` 行逐文件标记），**用例级目标各自一次进程**（退出码即结论）。
 - **串行**：多个目标用一个 promise 队列逐个跑，避免同时起一堆 MaaFW。

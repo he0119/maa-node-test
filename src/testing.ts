@@ -3,6 +3,9 @@ import * as vscode from "vscode";
 import {readNodeTestConfig, resolveNodeTestWorkspace} from "./config";
 import type {NodeTestWorkspace} from "./config";
 import {isTestFilePath, parseTestDocument} from "./core/document";
+import {collectMissingImages, describeMissingImage, summarizeMissingImage} from "./core/missingImages";
+import type {MissingImageWarning} from "./core/missingImages";
+import {locateImage} from "./core/testset";
 import {buildBatchRunTitle, buildRunTitle} from "./core/runnerArgs";
 import {
     buildMessageMarkdown,
@@ -74,6 +77,8 @@ export class NodeTestExplorer implements vscode.Disposable {
     private refreshTimer: NodeJS.Timeout | undefined;
     /** 串行执行：一次测试运行里的多个批次/目标逐个跑，避免同时起一堆 MaaFW 进程 */
     private queue: Promise<void> = Promise.resolve();
+    /** 探测阶段就报缺图：写用例时在 image 值下面直接画黄线，不用等跑完 */
+    private readonly diagnostics = vscode.languages.createDiagnosticCollection("maaNodeTest");
 
     constructor(private readonly extensionPath: string) {
         this.controller = vscode.tests.createTestController("maaNodeTest", "Maa 节点测试");
@@ -103,6 +108,7 @@ export class NodeTestExplorer implements vscode.Disposable {
 
     dispose(): void {
         if (this.refreshTimer) clearTimeout(this.refreshTimer);
+        this.diagnostics.dispose();
         for (const disposable of this.disposables) disposable.dispose();
         this.controller.dispose();
     }
@@ -122,9 +128,11 @@ export class NodeTestExplorer implements vscode.Disposable {
         // 按路径排序，目录和文件的顺序才稳定（VS Code 不会帮我们排）
         entries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 
+        const missing = this.reportMissingImages(entries);
+
         const dirItems = new Map<string, vscode.TestItem>();
         const dirCounts = new Map<string, number>();
-        for (const entry of entries) this.addTestFile(entry, dirItems, dirCounts);
+        for (const entry of entries) this.addTestFile(entry, dirItems, dirCounts, missing.get(entry.relativePath));
 
         for (const [
             dirPath,
@@ -176,11 +184,63 @@ export class NodeTestExplorer implements vscode.Disposable {
         return entries;
     }
 
+    /**
+     * 探测阶段检查每个文件的截图是否齐全，并把结果画成诊断 + 返回给建树用。
+     *
+     * 为什么要在这儿做：`maa-tools` 遇到缺图只打印跳过、跳过即通过，等跑完看到的是绿的；
+     * 写用例的时候在 image 值下面画一条黄线，比跑完再猜有效得多。
+     */
+    private reportMissingImages(entries: readonly TestFileEntry[]): Map<string, MissingImageWarning[]> {
+        this.diagnostics.clear();
+        const byFile = new Map<string, MissingImageWarning[]>();
+
+        const workspace = resolveNodeTestWorkspace();
+        if (!workspace) return byFile;
+
+        // 同一个图片名在一批文件里反复出现，扫描结果缓存一下，别每个用例都去 readdir
+        const cache = new Map<string, ReturnType<typeof locateImage>>();
+        const locate = (image: string): ReturnType<typeof locateImage> => {
+            const hit = cache.get(image);
+            if (hit) return hit;
+            const scanned = locateImage(workspace.testsetRoot, image);
+            cache.set(image, scanned);
+            return scanned;
+        };
+
+        for (const entry of entries) {
+            const warnings = collectMissingImages({
+                cases: entry.parsed.cases,
+                controllers: entry.parsed.configs.controller,
+                locate,
+            });
+            if (warnings.length === 0) continue;
+
+            byFile.set(entry.relativePath, warnings);
+            this.diagnostics.set(
+                entry.uri,
+                warnings.map(
+                    (warning) =>
+                        new vscode.Diagnostic(
+                            new vscode.Range(
+                                entry.document.positionAt(warning.offset),
+                                entry.document.positionAt(warning.offset + warning.length),
+                            ),
+                            describeMissingImage(warning),
+                            vscode.DiagnosticSeverity.Warning,
+                        ),
+                ),
+            );
+        }
+
+        return byFile;
+    }
+
     /** 一个测试文件 → 目录节点（按需创建）+ 文件节点 + 用例节点 */
     private addTestFile(
         entry: TestFileEntry,
         dirItems: Map<string, vscode.TestItem>,
         dirCounts: Map<string, number>,
+        missingImages?: readonly MissingImageWarning[],
     ): void {
         const segments = folderSegments(entry.relativePath);
 
@@ -212,7 +272,11 @@ export class NodeTestExplorer implements vscode.Disposable {
 
         for (const caseNode of fileNode.cases) {
             const caseItem = this.controller.createTestItem(caseNode.id, caseNode.label, entry.uri);
-            caseItem.description = caseNode.description;
+            // 探测阶段就把缺图写进节点，跑之前一眼能看到
+            const warning = missingImages?.find((item) => item.caseIndex === caseNode.caseIndex);
+            caseItem.description = warning
+                ? `${caseNode.description} · ${summarizeMissingImage(warning)}`
+                : caseNode.description;
             caseItem.range = new vscode.Range(
                 entry.document.positionAt(caseNode.start),
                 entry.document.positionAt(caseNode.end),
@@ -230,6 +294,7 @@ export class NodeTestExplorer implements vscode.Disposable {
 
     private scheduleRefresh(): void {
         if (this.refreshTimer) clearTimeout(this.refreshTimer);
+        this.diagnostics.dispose();
         this.refreshTimer = setTimeout(() => {
             this.refreshTimer = undefined;
             void this.refresh();
