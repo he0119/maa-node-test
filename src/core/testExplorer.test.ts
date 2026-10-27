@@ -36,17 +36,18 @@ test("用例标题：优先 name，其次图片名去扩展名，最后退化成
     assert.equal(describeCaseLabel(parsed.cases[2]), "第 3 个用例");
 });
 
-test("用例灰字：带图片名和预期命中数，负例要写清楚", () => {
+test("用例灰字：有 name 时带图片名，没有就只写命中情况，不再重复标题", () => {
     const parsed = parseTestDocument(SAMPLE);
-    assert.equal(describeCaseDescription(parsed.cases[1]), "四号谷地_地区建设.png · 预期命中 2 个节点");
-    assert.equal(describeCaseDescription(parsed.cases[2]), "没写 image · 负例（不期望命中）");
+    assert.equal(describeCaseDescription(parsed.cases[0]), "帝江号_大世界.png · 命中 1 个节点");
+    assert.equal(describeCaseDescription(parsed.cases[1]), "命中 2 个节点");
+    assert.equal(describeCaseDescription(parsed.cases[2]), "没写 image · 负例（不该命中）");
 });
 
-test("文件灰字：组名 + 平台/资源矩阵 + 用例数", () => {
+test("文件灰字：组名 + 平台/资源矩阵", () => {
     const parsed = parseTestDocument(SAMPLE);
     assert.equal(
         describeFileDescription(parsed, "Common/Button/test_close_button.json"),
-        "通用按钮 · Win32/ADB × 官服 · 3 个用例",
+        "通用按钮 · Win32/ADB × 官服",
     );
 
     const unnamed = parseTestDocument('{ "configs": { "resource": "官服" }, "cases": [] }');

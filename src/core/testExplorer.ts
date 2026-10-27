@@ -57,19 +57,21 @@ export function describeCaseLabel(entry: TestCase): string {
 
 /**
  * 用例右侧的灰字：图片名 + 预期命中节点数。
- * 有无 name 都带上图片名，因为「跑这张图」才是用户真正关心的。
+ * 标题已经是图片名（没写 name）时不再重复一遍 —— 同一行写两遍同样的字，只是把行撑长。
  */
 export function describeCaseDescription(entry: TestCase): string {
     const parts: string[] = [];
-    if (entry.image?.value) parts.push(entry.image.value);
-    else parts.push("没写 image");
-    parts.push(entry.hitCount === 0 ? "负例（不期望命中）" : `预期命中 ${entry.hitCount} 个节点`);
+    const image = entry.image?.value;
+    if (!image) parts.push("没写 image");
+    else if (entry.name) parts.push(image);
+    parts.push(entry.hitCount === 0 ? "负例（不该命中）" : `命中 ${entry.hitCount} 个节点`);
     return parts.join(" · ");
 }
 
 /**
- * 文件右侧的灰字：测试组名 + 平台/资源矩阵 + 用例数。
- * 这几个信息正好是「跑这个文件会展开成哪几组」的关键，省得用户回去翻 configs。
+ * 文件右侧的灰字：测试组名 + 平台/资源矩阵。
+ * 这几项正好是「跑这个文件会展开成哪几组」的关键，省得用户回去翻 configs；
+ * 用例数不写：展开就能看见，而且和目录行一样属于数数，凑长了只会被截断。
  */
 export function describeFileDescription(document: TestDocument, relativePath: string): string {
     const parts: string[] = [];
@@ -82,7 +84,6 @@ export function describeFileDescription(document: TestDocument, relativePath: st
             `${controllers.length > 0 ? controllers.join("/") : "未写 controller"} × ${resources.length > 0 ? resources.join("/") : "未写 resource"}`,
         );
     }
-    parts.push(`${document.cases.length} 个用例`);
     return parts.join(" · ");
 }
 
