@@ -3,6 +3,7 @@ import {test} from "node:test";
 
 import {
     aggregateFileResults,
+    caseOutcome,
     classifyErrorEntry,
     formatCaseFailure,
     formatCaseResultLine,
@@ -551,4 +552,20 @@ test("平台覆盖：声明了但没有匹配到组的 controller 会被点出�
     const summary = summarizePlatforms({groups: [win32], entries, isImageMissing: () => false});
 
     assert.deepEqual(summary.unmatched, [{file: "tests/a.json", controller: "ADB"}]);
+});
+
+test("用例结论：有失败报 fail，只有缺图报 skipped", () => {
+    assert.equal(caseOutcome({failures: [{platform: "ADB-官服", node: "X", reason: "没识别到"}], missing: []}), "fail");
+    assert.equal(
+        caseOutcome({failures: [], missing: [{platform: "ADB-官服", image: "a.png", path: "/x/a.png"}]}),
+        "skipped",
+    );
+    // 失败优先：既有失败又有缺图时仍按失败报
+    assert.equal(
+        caseOutcome({
+            failures: [{platform: "Win32-官服", node: "X", reason: "没识别到"}],
+            missing: [{platform: "ADB-官服", image: "a.png", path: "/x/a.png"}],
+        }),
+        "fail",
+    );
 });

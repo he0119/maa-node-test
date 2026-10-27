@@ -27,6 +27,7 @@ import {printResult} from "./lib/report.mjs";
 import {
     aggregateFileResults,
     attributeGroupResults,
+    caseOutcome,
     formatCaseFailure,
     formatCaseResultLine,
     formatFileResultLine,
@@ -297,15 +298,15 @@ async function run() {
         isImageMissing: (group, testCase) => !existsSync(resolveImagePath(cfg, group, testCase.image)),
     });
 
-    // 有失败的用例报 fail（顺便说明哪些平台是好的），只缺图的报 error
+    // 有失败的用例报 fail（顺便说明哪些平台是好的），只缺图的报 skipped（面板标灰，不算失败）
     const caseFailures = new Map();
     const caseSkipped = new Map();
     for (const [
         key,
         info,
     ] of caseResults) {
-        if (info.failures.length > 0) caseFailures.set(key, formatCaseFailure(info));
-        else if (info.missing.length > 0) caseSkipped.set(key, formatCaseFailure(info));
+        if (info.failures.length > 0) caseFailures.set(key, {info, text: formatCaseFailure(info)});
+        else if (info.missing.length > 0) caseSkipped.set(key, {info, text: formatCaseFailure(info)});
     }
 
     // 有明确的用例级失败，文件结论一定是失败（万一组名归因漏了，这里补上）
@@ -326,7 +327,7 @@ async function run() {
         console.log("逐用例失败原因：");
         for (const [
             key,
-            text,
+            {text},
         ] of caseFailures) {
             const [
                 fileKey,
@@ -339,10 +340,10 @@ async function run() {
 
     if (caseSkipped.size > 0) {
         console.log("");
-        console.log("被跳过的用例（截图不存在，等于没验证）：");
+        console.log("缺图跳过的用例（不算失败，补图后会真正验证）：");
         for (const [
             key,
-            text,
+            {text},
         ] of caseSkipped) {
             const [
                 fileKey,
@@ -355,23 +356,16 @@ async function run() {
 
     for (const [
         key,
-        text,
-    ] of caseFailures) {
+        {info, text},
+    ] of [
+        ...caseFailures,
+        ...caseSkipped,
+    ]) {
         const [
             fileKey,
             indexText,
         ] = splitCaseKey(key);
-        console.log(formatCaseResultLine(fileKey, Number(indexText), "fail", text.title, text.lines));
-    }
-    for (const [
-        key,
-        text,
-    ] of caseSkipped) {
-        const [
-            fileKey,
-            indexText,
-        ] = splitCaseKey(key);
-        console.log(formatCaseResultLine(fileKey, Number(indexText), "error", text.title, text.lines));
+        console.log(formatCaseResultLine(fileKey, Number(indexText), caseOutcome(info), text.title, text.lines));
     }
 
     for (const entry of entries) {

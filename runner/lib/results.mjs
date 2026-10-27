@@ -347,6 +347,17 @@ export function formatCaseFailure(info) {
     return {title, lines};
 }
 
+/**
+ * 一条用例该按哪种结论报：
+ * - 有平台真的失败了 → `fail`（面板标红）
+ * - 只有平台缺图、被跳过 → `skipped`（面板标灰，不算失败；来不及补图时不至于把整批染红）
+ *
+ * 缺图优先不算失败：只要有过真失败，就按失败报。
+ */
+export function caseOutcome(info) {
+    return info.failures.length > 0 ? "fail" : "skipped";
+}
+
 /** 去重但保留顺序 */
 function unique(items) {
     return [...new Set(items)];

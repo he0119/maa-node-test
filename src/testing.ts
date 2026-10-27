@@ -17,7 +17,7 @@ import {
     fallbackVerdict,
     verdictFromExitCode,
 } from "./core/testResult";
-import type {CaseVerdict, FileVerdict} from "./core/testResult";
+import type {CaseOutcome, CaseVerdict, FileVerdict} from "./core/testResult";
 import {buildFileNode, folderSegments} from "./core/testExplorer";
 import {describeCommand, startTestProcess} from "./runner";
 import type {RunRequest} from "./runner";
@@ -272,7 +272,9 @@ export class NodeTestExplorer implements vscode.Disposable {
 
         const fileNode = buildFileNode(entry.parsed, entry.uri.fsPath, entry.relativePath);
         const fileItem = this.controller.createTestItem(fileNode.id, fileNode.label, entry.uri);
-        fileItem.description = fileNode.description;
+        fileItem.description = missingImages?.length
+            ? `${fileNode.description} · ${missingImages.length} 条用例缺图`
+            : fileNode.description;
         fileItem.range = new vscode.Range(
             entry.document.positionAt(fileNode.start),
             entry.document.positionAt(fileNode.end),
@@ -597,16 +599,35 @@ export function collectTargets(
     ];
 }
 
-/** 按结论把节点标成通过 / 失败 / 没验证到 */
+/**
+ * 按结论把节点标成通过 / 失败 / 跳过。
+ *
+ * `skipped` 给「缺图没验证到」的用例用：这类情况不该把整次运行染红，标成灰色的跳过更贴近事实，
+ * 具体原因在探测阶段就写进节点描述了。文件通过时若带明细（哪几条跳过了），也一并挂在通过消息上。
+ */
 function applyMark(
     testRun: vscode.TestRun,
     item: vscode.TestItem,
-    verdict: FileVerdict,
+    verdict: CaseOutcome,
     text: {title: string; detail: readonly string[]},
     duration: number,
 ): void {
+    if (verdict === "skipped") {
+        testRun.skipped(item);
+        return;
+    }
     if (verdict === "pass") {
+        // VS Code 的 TestRun.passed 不接受消息，所以「哪几条因缺图跳过」写进测试输出
         testRun.passed(item, duration);
+        if (text.detail.length > 0) {
+            const lines = [
+                text.title,
+                ...text.detail,
+            ]
+                .map((line) => `· ${line}`)
+                .join("\n");
+            testRun.appendOutput(toOutputChunk(`${lines}\n`), undefined, item);
+        }
         return;
     }
     const message = buildTestMessage(text.title, text.detail);
