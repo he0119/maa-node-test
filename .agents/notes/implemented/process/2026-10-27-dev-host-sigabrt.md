@@ -1,4 +1,4 @@
-# Agent Note: 远端调试窗口每隔十来秒被 SIGABRT 杀掉（原因未定）
+# Agent Note: 远端调试窗口的扩展宿主被 SIGABRT 杀掉（根因在 libuv，不在本插件）
 
 Status: implemented
 
@@ -10,32 +10,65 @@ Status: implemented
 Extension Host Process exited with code: null, signal: SIGABRT.
 ```
 
-截至写这份记录：44 次调试窗口启动，13 次这样死掉（约三成），存活时间全部停在 9～15 秒，也就是「宿主启动收尾、`onStartupFinished` 那批扩展在激活」的那几秒。
+一天下来统计到 47 次调试窗口启动、8 次这样死掉（约 17%），存活时间集中在 9～15 秒，也就是扩展宿主启动收尾、`onStartupFinished` 那批扩展在激活的那几秒。主窗口那个长期运行的宿主（不加载本插件）一直没出过事。
+
+## 根因
+
+扩展宿主进程在事件循环里自己调用 `abort()`，栈是：
+
+```text
+frame #0  libc.so.6`abort
+frame #1  libc.so.6`___lldb_unnamed_symbol_29974
+frame #2  libc.so.6`__assert_fail
+frame #3  node`uv__io_poll(loop=..., timeout=0) at linux.c:1427
+frame #4  node`uv_run(...) at core.c:460
+frame #5  node::SpinEventLoopInternal(...)
+```
+
+对应 libuv 1.52.1（node 24.22.1 自带，VS Code 1.143.1 的远端 server 用它）的这段代码：
+
+```c
+if (!epoll_ctl(epollfd, op, fd, &e))
+  continue;
+
+assert(op == EPOLL_CTL_ADD);
+assert(errno == EEXIST);   /* ← 死在这里 */
+```
+
+即：libuv 把一个 fd 注册进 epoll 时，内核返回了**不是** `EEXIST` 的错误，libuv 没做任何降级处理，`assert` 失败直接把整个进程 abort 掉。
+
+用 eBPF 抓到的那次失败是：
+
+```text
+13:32:40 EPOLL_FAIL pid=3730448 comm=MainThread epfd=14 op=1 fd=76 errno=9
+```
+
+`op=1` 是 `EPOLL_CTL_ADD`，`errno=9` 是 **EBADF**（文件描述符无效）。同一个进程在崩溃前 3 秒里还有 41 次 `errno=17`（EEXIST，正常，libuv 会改用 MOD）和 11 次 `errno=2`（ENOENT，正常），只有这一条 EBADF 是致命的。fd 快照显示 76 号在被关掉之前是个 socket，崩溃那一刻已经从 fd 表里消失。
+
+所以链条是：**某处代码把一个仍被 libuv 监视队列引用的 fd 关掉了 → libuv 去注册这个已失效的编号 → 内核回 EBADF → libuv assert 失败 → 整个扩展宿主被 abort**。
+
+libuv 上游 issue [#5129](https://github.com/libuv/libuv/issues/5129) / [#5130](https://github.com/libuv/libuv/issues/5130) 描述的正是这个问题（提议像 `EPOLL_CTL_DEL` 那样把并发关闭引发的错误吞掉），但没有合进 1.x 分支，`v1.x` 最新代码里那行 `abort()` 还在。
+
+排除了的嫌疑：本插件（崩溃时它的输出通道 0 字节、代码纯 JS、只 spawn 自己的 runner 子进程）、`nekosu.maa-support`、`vadimcn.vscode-lldb`、`ms-vsliveshare.vsliveshare`（都在禁用后照样崩过），以及「挂着调试器」和「io_uring」（`Ctrl+F5` 不挂调试器也崩；关掉 io_uring 后崩在另一条路径上，见下）。
+
+另外还发现过第二类崩溃：`uv__epoll_ctl_flush` 里 `if (rc != (int) n) abort()`，因为 libuv 1.52.1 默认用 io_uring 批量提交 `epoll_ctl`，而内核 7.0.0-38 上 `io_uring_enter` 会部分完成。用 `kernel.io_uring_disabled=2` 可以让 libuv 退回普通 `epoll_ctl`（`io_uring_setup` 返回 EPERM，libuv 自己会降级），这一类崩溃随之消失；但 EBADF 这一条与 io_uring 无关，治不了。
 
 ## Decision
 
-调试配置保留两个：原配置，以及带 `--disable-extensions` 的「只加载本扩展（调试窗口会闪退时用）」。日常调试优先用后者，README 的「常见问题」里写明现象、已排除的对象和继续排查的入口。**不把这个当作已解决的问题**，只是绕开。
+**不在插件里做任何规避** —— 崩溃点在 node 的 C 代码里，插件的 JavaScript 没有任何能影响它的入口。README 的「常见问题」如实记录现象、根因和排查手法；调试配置保留「只加载本扩展」这个变体作为排查用（减少 fd 变动来源，能降低概率但不是根治）。
 
-排查过并排除的：
+真正的修法在两边：关掉那个 fd 的代码（VS Code 内部或某个扩展，无法从 core 里直接定位），或者 libuv 学会容忍 EBADF（上游 issue 提议的做法）。所以下一步是给 microsoft/vscode 提 issue。
 
-| 对象                  | 证据                                                                                                                                                                  |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 本插件                | 崩溃那个窗口里「Maa 节点测试」输出通道是 0 字节；代码纯 JS、只 spawn 自己的 runner 子进程，没有任何能发出 SIGABRT 的调用；刷新面板实测 9 毫秒（47 个文件 158 条用例） |
-| `nekosu.maa-support`  | 用「只排除它、保留 lldb」的配置复现了崩溃                                                                                                                             |
-| `vadimcn.vscode-lldb` | 禁用后连跑 8 次没崩（一度以为找到了），但随后在禁用状态下又崩了一次（`exthost56`，19:35:35 起、11 秒死，lldb 根本没激活）                                             |
+## 排查手法（下次遇到「窗口无声消失」可以直接照做）
 
-那个「8 次全绿」的教训：基线崩溃率约 34% 时，连续 8 次不崩的概率仍有约 6%，两三次更数不出来，得跑十几二十次才有区分度 —— 而每跑一次要人盯着窗口，成本很高。所以别再用「跑几次」猜，直接抓崩溃现场。
-
-## Alternatives considered
-
-**继续用「禁用某个扩展 → 跑几次」的方式二分。** 十几次才发现一次假阳性，而且每次要人工按 F5、等 15 秒、关窗口，一天也就跑几十次；崩溃率三成的情况下，要把 40 多个扩展二分开需要几百次试验。
-
-**抓 core dump。** `ulimit -c` 是 0，`/etc/default/apport` 虽然开着但收不到报告，需要改 `~/.bashrc`（`ulimit -c unlimited`）再断开重连远程窗口；而且在没装 gdb 的情况下，apport 报告也只是个 core 文件加地址，未必能直接读出符号。
-
-**改用 Node 的崩溃报告（下一步采用这条）。** 实测可用：给进程加上 `--report-on-signal --report-signal=SIGABRT --report-directory=/tmp` 之后，收到 SIGABRT 时 node 会写一份 `report.*.json`，里面有 `nativeStack`、`sharedObjects`（进程加载过的所有原生库）、`userLimits`、`environmentVariables` —— 足以看出是哪个原生库在地址空间里、崩在哪。落地方式是给远程 shell 的 `NODE_OPTIONS` 加这几个参数再重连；因为要改用户 shell 配置，留到下一次专门做。
+1. 服务端日志 `~/.vscode-server/data/logs/<时间戳>/remoteagent.log` 里搜 `signal: SIGABRT`，确认是信号杀进程而不是正常退出；对应宿主细节在同目录 `exthost<N>/remoteexthost.log`。
+2. 想留 core：`sudo sysctl -w kernel.core_pattern='/var/crash/core.%e.%p.%t'`，并让宿主进程的 `RLIMIT_CORE` 变成 unlimited（对已启动的进程用 `sudo prlimit --pid <pid> --core=unlimited`；也可以写进 shell 启动文件，但要注意 VS Code 会剔掉 `NODE_OPTIONS`、`LD_PRELOAD` 这类变量，`ulimit` 不受影响）。
+3. 读栈：不必装 gdb，`vadimcn.vscode-lldb` 扩展自带一个 lldb，`lldb -c <core> <node 路径> --batch -o "bt 15"` 就能看；`frame variable` 还能把 libuv 的局部变量（出问题的 fd、op）读出来。
+4. 抓 errno：`strace` 会把进程拖慢到让这类时序问题消失，改用 eBPF（`bpftrace`），只挂 `sys_enter_epoll_ctl` / `sys_exit_epoll_ctl` 两个点、只留 `comm == "MainThread"` 的记录。注意别把 `epoll_create`、全系统 `close` 也记进去，那会把日志撑到几百 MB，开销反而又把问题压掉。
+5. 反查 fd：另起一个每秒 `ls -l /proc/<pid>/fd` 的快照循环，崩溃后就能知道出问题的编号当时是 socket、管道还是普通文件。
 
 ## Consequences
 
-- 日常调试用「只加载本扩展」这个配置，窗口不再动不动消失；代价是调试宿主里看不到其它扩展的行为（调本插件不需要）。
-- 根因没闭合，README 里写的也是「原因还没定位」，不假装已经查清。
-- 下次再犯时的动作顺序：先在 `remoteagent.log` 里搜 `SIGABRT` 找到 `exthost<N>`，看它最后一批激活的是哪些扩展、活了多久；然后开 Node 崩溃报告复现一次，读 `report.*.json` 的 `nativeStack`。这套手法本身也写进了 README。
+- 调试窗口还是会偶发闪退（约 1/6 的概率），重开即可；不影响插件本身功能和发布产物。
+- `kernel.io_uring_disabled=2` 消掉了 io_uring 那类崩溃，是这台机器上的一个缓解措施，不是修复；设回默认值 0 就恢复原状（libuv 会重新使用 io_uring）。
+- 排查期间留下的产物（core 文件、`core_pattern`、后台脚本、`~/.zshenv` 里的试探性变量）都已清理。
