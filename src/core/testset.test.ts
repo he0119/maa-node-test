@@ -3,7 +3,7 @@ import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import * as path from "node:path";
 import {test} from "node:test";
-import {locateImage, readPngSize, scanTestsetDirs} from "./testset";
+import {chooseImage, locateImage, readPngSize, scanTestsetDirs} from "./testset";
 
 /** 造一个只有 PNG 头 + IHDR 的假文件，够 readPngSize 读尺寸用了 */
 function fakePng(width: number, height: number): Buffer {
@@ -132,4 +132,58 @@ test("readPngSize 对非 PNG、缺失文件都返回 null", (t) => {
     const truncated = path.join(testset.root, "Win32", "Official_CN", "半张.png");
     writeFileSync(truncated, fakePng(800, 600).subarray(0, 12));
     assert.equal(readPngSize(truncated), null);
+});
+
+test("挑跳转用的截图：按声明平台顺序挑，挑不到退回第一张", () => {
+    const cloud = {platform: "CloudADB", resource: "Official_CN", filePath: "/x/cloud.png", size: null};
+    const win32 = {platform: "Win32", resource: "Official_CN", filePath: "/x/win32.png", size: null};
+    const missing = {platform: "ADB", resource: "Official_CN", filePath: null, size: null};
+
+    // 声明顺序里 ADB 没图、Win32 有图 → 选 Win32
+    assert.equal(
+        chooseImage(
+            [
+                cloud,
+                missing,
+                win32,
+            ],
+            [
+                "ADB",
+                "Win32",
+            ],
+        )?.filePath,
+        "/x/win32.png",
+    );
+    // 声明了 CloudADB → 选它
+    assert.equal(
+        chooseImage(
+            [
+                cloud,
+                win32,
+            ],
+            ["CloudADB"],
+        )?.filePath,
+        "/x/cloud.png",
+    );
+    // 声明里一个都没有 → 扫描顺序第一张
+    assert.equal(
+        chooseImage(
+            [
+                cloud,
+                win32,
+            ],
+            ["Switch"],
+        )?.filePath,
+        "/x/cloud.png",
+    );
+    // 一张都没有 → undefined
+    assert.equal(chooseImage([missing], ["ADB"]), undefined);
+});
+
+test("挑跳转用的截图：别名平台按目录名匹配", () => {
+    const win32 = {platform: "Win32", resource: "Official_CN", filePath: "/x/win32.png", size: null};
+    const chosen = chooseImage([win32], ["Win32-Front"], (controller) =>
+        controller === "Win32-Front" ? "Win32" : controller,
+    );
+    assert.equal(chosen?.filePath, "/x/win32.png");
 });

@@ -223,7 +223,8 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 | Ctrl+Click / F12 | 跳到节点名在 pipeline 文件里的位置 | `providers/inlayHints.ts` | `hits` 节点名后面的注释（`desc`），点击跳定义 |
 | `providers/definition.ts` |
 
-- 三种能力都只认 `cases[n].hits[m]` 和 `cases[n].hits[m].node` 这两个路径（`isHitsEntryPath()`），在 `name`、`image` 里点到同名文字不跳也不弹；
+- 节点相关的三种能力只认 `cases[n].hits[m]` 和 `cases[n].hits[m].node` 这两个路径（`isHitsEntryPath()`），在 `name` 里点到同名文字不跳也不弹；
+- `image` 字段的跳转走另一条路：`findImageFieldAt()` 认出光标在键或值上，`locateImage()` 扫全平台，`chooseImage()` 按声明的平台顺序取第一张（Platform 别名先经 `resolveControllerDir()` 换成目录名）。同时存在多个平台时**只跳一张**，不给列表 —— 想看别的平台用悬浮里的「打开原图」；
 - 节点名写错时：悬浮说「pipeline 里没有这个节点」，跳转给空；
 - 识别/动作的取值要兼容两种写法：字符串（`"recognition": "TemplateMatch"`）和对象（`{"type": "TemplateMatch"}`），没写就退回 `custom_recognition` / `custom_action`；
 - 源码片段按 `keyOffset` 到 `endOffset` 从原文截，所以悬浮里看到的就是 pipeline 里真实的那一段，不是重新序列化的结果；

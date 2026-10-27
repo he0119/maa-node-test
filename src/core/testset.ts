@@ -121,3 +121,26 @@ function listDirs(parent: string): string[] {
         return [];
     }
 }
+
+/**
+ * 从扫描结果里挑一张图给「Ctrl+Click 跳到截图」用。
+ *
+ * 优先按本文件声明的平台顺序挑（`configs.controller` 的第一项），挑不到再退回扫描顺序里的第一张 ——
+ * 同一个文件名在多个平台都有时，跳到一个确定的、符合用户预期的位置，比弹一个列表让人选更省事；
+ * 想看别的平台的照片，悬浮里已经列了全部「打开原图」链接。
+ */
+export function chooseImage(
+    locations: readonly ImageLocation[],
+    controllers: readonly string[] = [],
+    resolvePlatform: (controller: string) => string = (controller) => controller,
+): ImageLocation | undefined {
+    const found = locations.filter((location) => location.filePath !== null);
+    if (found.length === 0) return undefined;
+
+    for (const controller of controllers) {
+        const dir = resolvePlatform(controller);
+        const hit = found.find((location) => location.platform === dir);
+        if (hit) return hit;
+    }
+    return found[0];
+}
