@@ -21,12 +21,20 @@ let explorer: NodeTestExplorer | undefined;
 /** 补全用的仓库索引：按工作区缓存，换工作区或改设置就重建 */
 let repoIndex: RepoIndex | undefined;
 let repoIndexKey = "";
+/** 后台预热用的定时器和待预热队列 */
+let warmTimer: NodeJS.Timeout | undefined;
+const warmPending = new Map<string, {controllers: string[]; count: number}>();
+const warmDone = new Set<string>();
+/** 激活后等一会儿再开始预热，先让 VS Code 把界面和面板画出来 */
+const WARM_START_DELAY_MS = 1200;
+/** 两个 scope 之间留出间隙，别连着占 CPU */
+const WARM_STEP_DELAY_MS = 200;
 
 /** 这里只做装配：创建输出通道、注册 provider 和命令，具体逻辑各在各的模块里 */
 export function activate(context: vscode.ExtensionContext): void {
     const output = vscode.window.createOutputChannel("Maa 节点测试");
     runner = new NodeTestRunner(output, context.extensionPath);
-    explorer = new NodeTestExplorer(context.extensionPath, resolveController);
+    explorer = new NodeTestExplorer(context.extensionPath, resolveController, scheduleWarm);
 
     context.subscriptions.push(
         output,
@@ -60,6 +68,46 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 }
 
+/**
+ * 把「这份测试文件声明的控制器组合」排进后台预热队列。
+ *
+ * 为什么要预热：建节点索引要读几百个 pipeline 文件（约 350ms），如果不预热，第一次在 hits 里补全、
+ * 第一次打开带 hits 的文件、第一次悬浮节点名都会卡这么一下。放到后台做，用户真去操作时是 5ms。
+ */
+function scheduleWarm(scopes: readonly (readonly string[])[]): void {
+    for (const scope of scopes) {
+        const key = scopeKey(scope);
+        if (warmDone.has(key)) continue;
+        const existing = warmPending.get(key);
+        if (existing) existing.count += 1;
+        else warmPending.set(key, {controllers: [...scope], count: 1});
+    }
+    if (warmPending.size > 0 && !warmTimer) warmTimer = setTimeout(warmStep, WARM_START_DELAY_MS);
+}
+
+/** 一次预热一个 scope，优先热用得最多的那个（多半是基础资源那份） */
+function warmStep(): void {
+    warmTimer = undefined;
+
+    const next = [...warmPending.entries()].sort((left, right) => right[1].count - left[1].count)[0];
+    if (!next) return;
+    warmPending.delete(next[0]);
+    warmDone.add(next[0]);
+
+    try {
+        currentRepoIndex()?.nodes(next[1].controllers);
+    } catch {
+        // 预热失败不影响任何功能，下次操作时现建就好
+    }
+
+    if (warmPending.size > 0) warmTimer = setTimeout(warmStep, WARM_STEP_DELAY_MS);
+}
+
+/** 控制器组合当缓存键，顺序无关 */
+function scopeKey(scope: readonly string[]): string {
+    return [...scope].sort().join(",");
+}
+
 /** 把测试文件里的 controller 名字换成截图目录名（loader 里有别名时，例如 Win32-Front → Win32） */
 function resolveController(controller: string): string {
     return repoIndex ? resolveControllerDir(repoIndex.maps(), controller) : controller;
@@ -80,6 +128,9 @@ function currentRepoIndex(): RepoIndex | null {
 
 /** 卸载时把还没跑完的 node 进程收掉，别留孤儿 */
 export function deactivate(): void {
+    if (warmTimer) clearTimeout(warmTimer);
+    warmTimer = undefined;
+    warmPending.clear();
     killRunningTests();
     runner = undefined;
     explorer = undefined;

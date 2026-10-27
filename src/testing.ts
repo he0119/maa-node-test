@@ -84,6 +84,8 @@ export class NodeTestExplorer implements vscode.Disposable {
         private readonly extensionPath: string,
         /** controller 显示名 → 截图目录名（loader 的别名映射）；不传就按同名处理 */
         private readonly resolveController: (controller: string) => string = (controller) => controller,
+        /** 发现测试文件后，把它们的控制器组合交出去（用于后台预热节点索引） */
+        private readonly onScopesDiscovered: (scopes: readonly (readonly string[])[]) => void = () => {},
     ) {
         this.controller = vscode.tests.createTestController("maaNodeTest", "Maa 节点测试");
         this.controller.refreshHandler = () => this.refresh();
@@ -144,6 +146,9 @@ export class NodeTestExplorer implements vscode.Disposable {
         ] of dirItems) {
             item.description = `含 ${dirCounts.get(dirPath) ?? 0} 个测试文件`;
         }
+
+        // 顺手把这些文件声明的控制器组合交出去，让后台预热节点索引（不然第一次补全要等 350ms）
+        this.onScopesDiscovered(entries.map((entry) => entry.parsed.configs.controller));
     }
 
     /** 扫出所有测试文件并解析；坏掉的 JSON 跳过并留一句警告，不影响整个面板 */
