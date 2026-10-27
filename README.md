@@ -215,3 +215,9 @@ node runner/run-single-test.mjs \
 这个扩展是 MaaEnd 节点测试的配套开发工具，但**不放在 MaaEnd 仓库里**：仓库的 CI 只为 Pipeline / 资源 / Agent 服务，加一个需要 `tsc` 构建的 VS Code 扩展会平白多一套构建产物和依赖。
 
 插件对 MaaEnd 仓库的假设只有三条：工作区根有 `maatools.config.mts`、截图在 `tests/MaaEndTestset` 下按 `<控制器>/<资源服>` 分目录、测试文件叫 `tests/**/test_*.json`。这三条变了，改设置项或 `core/` 里对应的一小段即可。
+
+## 给 agent / 新维护者的入口
+
+- [AGENTS.md](AGENTS.md)：项目边界、常用命令、代码地图、硬约束；
+- [.agents/skills/maa-node-test-dev/SKILL.md](.agents/skills/maa-node-test-dev/SKILL.md)：改动这个插件时的操作手册，同目录的 [reference.md](.agents/skills/maa-node-test-dev/reference.md) 是命令行契约、退出码映射等细节；
+- [.agents/notes/](.agents/notes/README.md)：设计取舍记录 —— 为什么自带 runner 而不改上游、为什么插件独立成仓、调试窗口为什么必须是 MaaEnd。
