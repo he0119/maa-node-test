@@ -197,9 +197,24 @@ pnpm run compile
 
 **调试窗口（F5）起来十来秒就整个关掉，控制台没有任何报错。**
 
-在远端（Remote-SSH）调试时遇到过：`vadimcn.vscode-lldb` 这个扩展会让调试窗口的扩展宿主在启动 10～15 秒后被系统强制结束（服务端日志里是 `Extension Host Process exited with code: null, signal: SIGABRT`），窗口随之关闭，而客户端和服务端都留不下任何 JavaScript 报错。跟本插件无关（那个窗口里插件的输出通道一行字都没有）。
+在远端（Remote-SSH）调试时遇到过：扩展开发宿主窗口在启动 9～15 秒后整个消失，服务端日志里只有一句 `Extension Host Process exited with code: null, signal: SIGABRT`，客户端和服务端都不留下任何 JavaScript 报错。一天里统计到 47 次调试窗口启动、8 次这样死掉（约六分之一）。
 
-绕开办法：`.vscode/launch.json` 里选「运行 Maa 节点测试插件（禁用 lldb，远端调试窗口会崩时用）」这个配置，它只是多带一个 `--disable-extension=vadimcn.vscode-lldb`。需要 LLDB 调试时再切回普通配置。
+**跟本插件无关**，锅在 node 自带的事件循环库 libuv 里。崩溃栈是：
+
+```text
+libc`abort
+libc`__assert_fail
+node`uv__io_poll(...) at linux.c:1427
+node`uv_run(...)
+```
+
+libuv 给某个文件描述符注册监听时，内核回的不是「已经注册过」（`EEXIST`）而是 `EBADF`（这个描述符已经失效），libuv 没做降级处理，`assert` 一失败就把整个进程 abort 掉。用 eBPF 抓到的现场是 `EPOLL_CTL_ADD fd=76 errno=9`，而 fd 快照显示 76 号在被关闭前是个 socket —— 也就是**有代码把一个还在被监听的 socket 提前关了**。libuv 上游 [issue #5129](https://github.com/libuv/libuv/issues/5129) / [#5130](https://github.com/libuv/libuv/issues/5130) 说的就是这个问题，但修复没有进 1.x 分支。
+
+已经排除的：本插件（崩溃那个窗口里它的输出通道是 0 字节，代码纯 JS，没有任何能发出 SIGABRT 的调用）、`nekosu.maa-support`、`vadimcn.vscode-lldb`、`ms-vsliveshare.vsliveshare`，以及「挂着调试器」（`Ctrl+F5` 不挂调试器也会崩）。
+
+临时办法：`.vscode/launch.json` 里选「只加载本扩展（调试窗口会闪退时用）」，它带 `--disable-extensions`，调试窗口里只加载本插件 —— 少了其它扩展的 socket 增删，能降低概率但不是根治。崩了就重开，插件本身的功能不受影响。
+
+自己往下查的话：服务端日志在 `~/.vscode-server/data/logs/<时间戳>/remoteagent.log`（搜 `SIGABRT`），宿主细节在同目录 `exthost<N>/remoteexthost.log`；想拿原生调用栈就开 core（`kernel.core_pattern` + `prlimit --core=unlimited`），然后用 `vadimcn.vscode-lldb` 自带的 lldb 读；想抓 errno 用 `bpftrace` 而不是 `strace`（`strace` 会把进程拖慢，反而让这种时序问题消失）。完整步骤记在 [.agents/notes/implemented/process/2026-10-27-dev-host-sigabrt.md](.agents/notes/implemented/process/2026-10-27-dev-host-sigabrt.md)。
 
 **点运行，提示「没跑起来」。**
 大多是 node 版本低于 22，用 `maaNodeTest.nodePath` 指到 22+ 的 node。也可能是第一次运行要联网下载 MaaFW 失败，看「Maa 节点测试」输出面板里的 prepare 日志。
