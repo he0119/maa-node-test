@@ -23,7 +23,9 @@
 | `core/missingImages.ts` | 探测阶段查缺图：哪些声明平台没有这张截图、平台目录是否压根不存在，以及对应的诊断文案 |
 | `core/loaderMaps.ts` | 解析 `tests/scripts/loader.mts` 的 `controllerMap` / `resourceMap`（显示名 → 截图目录名），供补全、缺图检查、悬浮共用 |
 | `core/completion.ts` | 用 `jsonc-parser` 的 `getLocation` 判断光标在哪一层，给出该位置的候选（纯逻辑） |
-| `core/repoIndex.ts` | 补全的数据来源：loader 映射、测试集截图名、pipeline 节点名，各自带缓存 |
+| `core/repoIndex.ts` | 补全的数据来源：loader 映射、测试集截图名、pipeline 节点索引，各自带缓存 |
+| `core/pipeline.ts` | 解析 pipeline 文件里每个节点的位置与说明（`desc` / `focus` / 识别 / 动作），以及 `hits` 路径判断 |
+| `providers/definition.ts` | `hits` 里的节点名 Ctrl+Click / F12 跳到 pipeline 里的定义 |
 | `core/testExplorer.ts` | 把测试文件翻成测试面板的树描述（id、label、description、range）；`folderSegments()` 决定目录分组层级 |
 
 ### `runner/`
@@ -202,9 +204,26 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 - **判断光标在哪一层用 `jsonc-parser` 的 `getLocation`**，别自己扫文本。有个坑：**在写键时它会把「已经敲进去的半截键名」当成最后一个路径段**（`{"configs": {` → `['configs','']`），所以 `completionContextAt()` 在 `atKey` 时 `path.pop()` 一次，路径才是「光标所在的那个对象」。
 - **拿不准就不给候选**：`name`、`imageRoot`、`box` 这些没有可枚举取值的字段返回空数组，宁可不弹也别给错的值。
 - **插入文本看上下文**：光标已经在字符串里（`inString`）就只插内容，否则连引号一起插。
-- **缓存**：loader 映射按 mtime 缓存；截图列表按各平台目录 mtime 合成戳；节点名懒加载并缓存 10 秒（421 个 pipeline 文件首次约 36ms，之后 0ms）。不触发补全就不会扫。
+- **缓存**：loader 映射按 mtime 缓存；截图列表按各平台目录 mtime 合成戳；节点索引懒加载、缓存 10 秒，并且**按文件 mtime 增量重建** —— 421 个 pipeline 文件首次约 340ms（6082 个节点），文件都没改时重建只要 6ms。不触发补全就不会扫。
+- **节点注释照参考实现（maa-support-extension）的做法**：补全候选只带节点名，`resolveCompletionItem` 展开时才去查注释（`documentation = desc + Reco/Act + 定义位置`），不给 6082 个候选预先拼字符串。
 - **别名一致性**：`loaderMaps.resolveControllerDir()` 是唯一的换名入口，缺图检查和悬浮也走它 —— 否则 `Win32-Front` 会被误报成「测试集里没有这个平台的目录」。
 - **loader 解析用正则**：只取两个对象字面量的键值，注释掉的条目要剔除（loader 里常用注释占位）。别为了 4KB 文件引入 TypeScript 解析器。
+
+## 节点注释与跳转
+
+`hits` 里的节点名有三处能力，数据都来自 `core/pipeline.ts` 解析出的节点索引：
+
+| 场景 | 表现 | 实现 |
+| --- | --- | --- |
+| 补全（展开候选） | `desc` + `Reco: X · Act: Y` + `定义在 \`path:line\`` | `resolveCompletionItem` 懒填 |
+| 悬浮节点名 | 名称 + `path:line`，`desc`、Reco/Act，**节点源码 JSON 片段**（超过 40 行截断） | `providers/hover.ts` 的 `nodeHover()` |
+| Ctrl+Click / F12 | 跳到节点名在 pipeline 文件里的位置 | `providers/definition.ts` |
+
+- 三种能力都只认 `cases[n].hits[m]` 和 `cases[n].hits[m].node` 这两个路径（`isHitsEntryPath()`），在 `name`、`image` 里点到同名文字不跳也不弹；
+- 节点名写错时：悬浮说「pipeline 里没有这个节点」，跳转给空；
+- 识别/动作的取值要兼容两种写法：字符串（`"recognition": "TemplateMatch"`）和对象（`{"type": "TemplateMatch"}`），没写就退回 `custom_recognition` / `custom_action`；
+- 源码片段按 `keyOffset` 到 `endOffset` 从原文截，所以悬浮里看到的就是 pipeline 里真实的那一段，不是重新序列化的结果；
+- 悬停里的图片、节点合并结果这些参考实现有的东西**没做** —— 那是给 pipeline 编辑器看的，节点测试只需要「这是哪个节点、它想识别什么」。
 
 ## 单测地图
 

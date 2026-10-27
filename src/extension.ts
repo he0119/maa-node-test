@@ -8,6 +8,7 @@ import {NodeTestCodeLensProvider, TEST_FILE_SELECTOR} from "./providers/codeLens
 import {resolveControllerDir} from "./core/loaderMaps";
 import {RepoIndex} from "./core/repoIndex";
 import {NodeTestCompletionProvider} from "./providers/completion";
+import {NodeTestDefinitionProvider} from "./providers/definition";
 import {NodeTestHoverProvider} from "./providers/hover";
 import {describeError, killRunningTests, NodeTestRunner} from "./runner";
 import type {RunRequest} from "./runner";
@@ -33,6 +34,11 @@ export function activate(context: vscode.ExtensionContext): void {
         explorer,
         vscode.languages.registerCodeLensProvider(TEST_FILE_SELECTOR, new NodeTestCodeLensProvider()),
         vscode.languages.registerHoverProvider(TEST_FILE_SELECTOR, new NodeTestHoverProvider(currentRepoIndex)),
+        // hits 里的节点名可以 Ctrl+Click / F12 跳到 pipeline 里的定义
+        vscode.languages.registerDefinitionProvider(
+            TEST_FILE_SELECTOR,
+            new NodeTestDefinitionProvider(currentRepoIndex),
+        ),
         // 补全：controller / resource 取 loader 里的映射，image 取测试集里的截图，hits 取 pipeline 节点
         vscode.languages.registerCompletionItemProvider(
             TEST_FILE_SELECTOR,

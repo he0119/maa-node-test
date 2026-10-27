@@ -3,6 +3,8 @@ import type {Dirent} from "node:fs";
 import * as path from "node:path";
 import type {RepoData} from "./completion";
 import type {LoaderEntry, LoaderMaps} from "./loaderMaps";
+import {describeNodeBehavior, describePipelineNode, parsePipelineNodes} from "./pipeline";
+import type {PipelineNode} from "./pipeline";
 import {EMPTY_LOADER_MAPS, dirOf, parseLoaderMaps, resolveControllerDir} from "./loaderMaps";
 import {scanTestsetDirs} from "./testset";
 
@@ -22,7 +24,9 @@ const NODE_CACHE_TTL_MS = 10_000;
 export class RepoIndex implements RepoData {
     private mapsCache: {stamp: number; maps: LoaderMaps} | undefined;
     private imageCache: {stamp: string; byPlatform: Map<string, string[]>} | undefined;
-    private nodeCache: {at: number; names: string[]} | undefined;
+    private nodeCache: {at: number; nodes: Map<string, PipelineNode>} | undefined;
+    /** 单个 pipeline 文件的解析结果，按 mtime 复用：TTL 过期后只重新解析改过的文件 */
+    private readonly nodeFiles = new Map<string, {mtime: number; nodes: PipelineNode[]}>();
 
     constructor(
         private readonly workspaceRoot: string,
@@ -54,16 +58,58 @@ export class RepoIndex implements RepoData {
 
     /** pipeline 节点名：既是 hits 里能写的名字，也是识别结果的归因对象 */
     nodes(): readonly string[] {
-        if (this.nodeCache && Date.now() - this.nodeCache.at < NODE_CACHE_TTL_MS) return this.nodeCache.names;
+        return [...this.nodeIndex().keys()].sort();
+    }
 
-        const names = new Set<string>();
+    /** 某个节点的定义位置和说明；名字写错时返回 undefined */
+    nodeInfo(name: string): PipelineNode | undefined {
+        return this.nodeIndex().get(name);
+    }
+
+    /**
+     * 补全里挂在节点候选上的说明：注释 + 识别/动作 + 定义位置。
+     * 抄参考实现（maa-support-extension）的写法，三段之间空行。
+     */
+    describeNode(name: string): string | undefined {
+        const node = this.nodeInfo(name);
+        if (!node) return undefined;
+
+        const where = relativePath(this.workspaceRoot, node.filePath);
+        const blocks: string[] = [];
+        const summary = describePipelineNode(node);
+        if (summary) blocks.push(summary);
+
+        const behavior = describeNodeBehavior(node);
+        if (behavior) blocks.push(behavior);
+
+        blocks.push(`定义在 \`${where}:${node.line}\``);
+        return blocks.join("\n\n");
+    }
+
+    /** 节点名 → 节点信息；同名节点以先扫到的为准（MaaEnd 里不该有重名） */
+    private nodeIndex(): Map<string, PipelineNode> {
+        if (this.nodeCache && Date.now() - this.nodeCache.at < NODE_CACHE_TTL_MS) return this.nodeCache.nodes;
+
+        const nodes = new Map<string, PipelineNode>();
+        const seen = new Set<string>();
         for (const file of listJsonFiles(path.join(this.workspaceRoot, PIPELINE_DIR))) {
-            const keys = topLevelKeysOf(file);
-            for (const key of keys) names.add(key);
+            seen.add(file);
+            const mtime = mtimeOf(file);
+            const cached = this.nodeFiles.get(file);
+            // 只重新解析改过的文件，没改的直接用上次的结果
+            const parsed = cached && cached.mtime === mtime ? cached.nodes : parsePipelineNodes(readText(file), file);
+            this.nodeFiles.set(file, {mtime, nodes: parsed});
+
+            for (const node of parsed) {
+                if (!nodes.has(node.name)) nodes.set(node.name, node);
+            }
         }
-        const sorted = [...names].sort();
-        this.nodeCache = {at: Date.now(), names: sorted};
-        return sorted;
+        for (const file of [...this.nodeFiles.keys()]) {
+            if (!seen.has(file)) this.nodeFiles.delete(file);
+        }
+
+        this.nodeCache = {at: Date.now(), nodes};
+        return nodes;
     }
 
     /** 当前读到的映射表（带 mtime 缓存） */
@@ -95,6 +141,11 @@ export class RepoIndex implements RepoData {
     }
 }
 
+/** 相对工作区的路径，统一正斜杠 */
+function relativePath(root: string, target: string): string {
+    return path.relative(root, target).replace(/\\/g, "/");
+}
+
 /** 递归列出目录下的 json 文件；目录不在就返回空 */
 function listJsonFiles(root: string): string[] {
     const found: string[] = [];
@@ -113,24 +164,6 @@ function listJsonFiles(root: string): string[] {
     };
     walk(root);
     return found;
-}
-
-/** 只取顶层键，不解析整份 JSON 之外的任何东西；坏文件跳过 */
-function topLevelKeysOf(file: string): string[] {
-    const text = readText(file);
-    if (!text) return [];
-    try {
-        const parsed: unknown = JSON.parse(stripTrailingCommas(text));
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
-        return Object.keys(parsed as Record<string, unknown>);
-    } catch {
-        return [];
-    }
-}
-
-/** MaaEnd 的 pipeline 允许尾逗号（JSONC 风格），JSON.parse 之前先去掉 */
-function stripTrailingCommas(text: string): string {
-    return text.replace(/,(\s*[}\]])/g, "$1");
 }
 
 function listPngFiles(dir: string): string[] {

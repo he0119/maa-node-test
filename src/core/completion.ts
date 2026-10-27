@@ -37,6 +37,8 @@ export interface Candidate {
     kind: CandidateKind;
     /** 灰字说明，例如这个 controller 对应哪个截图目录 */
     detail?: string;
+    /** 节点候选专用：节点名，provider 展开候选时再据此去查注释（懒加载，不预先拼 1938 段文字） */
+    nodeName?: string;
 }
 
 /** 顶层和各级对象允许的键。测试文件的结构就这几层，写死不影响通用性 */
@@ -136,7 +138,7 @@ export function candidatesFor(
 
     // hits 里的节点名：既可以写成字符串，也可以写成 { node: "..." }
     if (fieldPath[0] === "cases" && fieldPath[2] === "hits" && (field === "hits" || field === "node")) {
-        return data.nodes().map((name) => ({label: name, kind: "node" as const}));
+        return data.nodes().map((name) => ({label: name, kind: "node" as const, nodeName: name}));
     }
 
     return [];
