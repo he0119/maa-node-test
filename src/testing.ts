@@ -75,6 +75,8 @@ export class NodeTestExplorer implements vscode.Disposable {
     /** 节点 id → 叶子信息。运行时只认这张表，不再靠解析 id 字符串 */
     private readonly leaves = new Map<string, LeafInfo>();
     private refreshTimer: NodeJS.Timeout | undefined;
+    /** 插件已经销毁：迟到的事件（文件监听、300ms 防抖）不能再碰 vscode 对象，碰了会抛「已销毁」 */
+    private disposed = false;
     /** 串行执行：一次测试运行里的多个批次/目标逐个跑，避免同时起一堆 MaaFW 进程 */
     private queue: Promise<void> = Promise.resolve();
     /** 探测阶段就报缺图：写用例时在 image 值下面直接画黄线，不用等跑完 */
@@ -113,7 +115,9 @@ export class NodeTestExplorer implements vscode.Disposable {
     }
 
     dispose(): void {
+        this.disposed = true;
         if (this.refreshTimer) clearTimeout(this.refreshTimer);
+        this.refreshTimer = undefined;
         this.diagnostics.dispose();
         for (const disposable of this.disposables) disposable.dispose();
         this.controller.dispose();
@@ -121,6 +125,7 @@ export class NodeTestExplorer implements vscode.Disposable {
 
     /** 重新扫描所有测试文件。清空后重建，保证和磁盘一致 */
     async refresh(): Promise<void> {
+        if (this.disposed) return;
         this.controller.items.replace([]);
         this.leaves.clear();
 
@@ -131,6 +136,8 @@ export class NodeTestExplorer implements vscode.Disposable {
         }
 
         const entries = await this.collectTestFiles(workspaceRoot);
+        // 扫盘期间插件被销毁（窗口关掉、扩展停用）就别接着往下建树了
+        if (this.disposed) return;
         // 按路径排序，目录和文件的顺序才稳定（VS Code 不会帮我们排）
         entries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 
@@ -305,8 +312,12 @@ export class NodeTestExplorer implements vscode.Disposable {
     }
 
     private scheduleRefresh(): void {
+        if (this.disposed) return;
         if (this.refreshTimer) clearTimeout(this.refreshTimer);
-        this.diagnostics.dispose();
+        // 这里只能 clear，不能 dispose：诊断集合一旦 dispose 就永久作废，之后的 clear / set 都会抛
+        // 「illegal state - object is disposed」，refresh 断在半路，面板被清空后建不回来。
+        // dispose 归 dispose() 管，那是插件的生命周期终点。
+        this.diagnostics.clear();
         this.refreshTimer = setTimeout(() => {
             this.refreshTimer = undefined;
             void this.refresh();
