@@ -344,7 +344,7 @@ node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
 
 ### VSIX 里有什么
 
-`.vscodeignore` 只留五类东西：`package.json`、`README.md`、`icon.png`、`dist/**`、`LICENSE`（有的话）。`src/`、`out/`、`runner/`、`scripts/`、`.github/`、`.agents/`、`pnpm-workspace.yaml` 都不进包。打出来的包约 127KB、9 个文件，解包后**没有 node_modules**也能跑（已验证：从解包目录直接执行 `dist/run-single-test.mjs` 正常）。
+`.vscodeignore` 只留五类东西：`package.json`、`README.md`、`icon.png`、`LICENSE`（vsce 会改名成 `LICENSE.txt`）、`dist/**`。`src/`、`out/`、`runner/`、`scripts/`、`.github/`、`.agents/`、`pnpm-workspace.yaml` 都不进包。打出来的包约 236KB、10 个文件，解包后**没有 node_modules**也能跑（已验证：从解包目录直接执行 `dist/run-single-test.mjs` 正常）。
 
 ### 本地怎么打包
 

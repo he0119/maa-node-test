@@ -224,3 +224,7 @@ pnpm run compile
 - [MaaXYZ/MaaFramework](https://github.com/MaaXYZ/MaaFramework)：节点（Pipeline）协议与识别算法，节点测试跑的就是它。
 - [MaaEnd/MaaEnd](https://github.com/MaaEnd/MaaEnd)：节点测试的用例格式、`tests/MaaEndTestset` 的测试集目录约定、`tests/scripts/loader.mts` 里的控制器与资源映射；插件的默认值和图标都取自这个仓库。
 - [he0119/vscode-bangumiplan](https://github.com/he0119/vscode-bangumiplan)：发布流程的参考，测试/发布两个 workflow 的结构（vsce 发布、Open VSX、GitHub Release 附件）照它配的。
+
+## License
+
+MIT
