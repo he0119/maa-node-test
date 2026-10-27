@@ -16,27 +16,12 @@
             "preLaunchTask": "build"
         },
         {
-            "name": "只加载本扩展（干净模式）",
+            "name": "只加载本扩展（调试窗口会闪退时用）",
             "type": "extensionHost",
             "request": "launch",
             "args": [
                 "--extensionDevelopmentPath=${workspaceFolder}",
                 "--disable-extensions",
-                "${workspaceFolder}/../MaaEnd"
-            ],
-            "outFiles": [
-                "${workspaceFolder}/out/**/*.js",
-                "${workspaceFolder}/dist/**/*.js"
-            ],
-            "preLaunchTask": "build"
-        },
-        {
-            "name": "运行 Maa 节点测试插件（禁用 lldb，远端调试窗口会崩时用）",
-            "type": "extensionHost",
-            "request": "launch",
-            "args": [
-                "--extensionDevelopmentPath=${workspaceFolder}",
-                "--disable-extension=vadimcn.vscode-lldb",
                 "${workspaceFolder}/../MaaEnd"
             ],
             "outFiles": [

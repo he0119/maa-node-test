@@ -197,9 +197,13 @@ pnpm run compile
 
 **调试窗口（F5）起来十来秒就整个关掉，控制台没有任何报错。**
 
-在远端（Remote-SSH）调试时遇到过：`vadimcn.vscode-lldb` 这个扩展会让调试窗口的扩展宿主在启动 10～15 秒后被系统强制结束（服务端日志里是 `Extension Host Process exited with code: null, signal: SIGABRT`），窗口随之关闭，而客户端和服务端都留不下任何 JavaScript 报错。跟本插件无关（那个窗口里插件的输出通道一行字都没有）。
+在远端（Remote-SSH）调试时遇到过：扩展开发宿主窗口在启动 9～15 秒后整个消失，服务端日志里只有一句 `Extension Host Process exited with code: null, signal: SIGABRT`，客户端和服务端都不留下任何 JavaScript 报错。截至目前 44 次调试窗口启动里出现过 13 次（约三成），**原因还没定位**。
 
-绕开办法：`.vscode/launch.json` 里选「运行 Maa 节点测试插件（禁用 lldb，远端调试窗口会崩时用）」这个配置，它只是多带一个 `--disable-extension=vadimcn.vscode-lldb`。需要 LLDB 调试时再切回普通配置。
+已经排除的：本插件（崩溃那个窗口里它的输出通道是 0 字节，代码是纯 JS，没有任何能发出 SIGABRT 的调用）、`nekosu.maa-support`、`vadimcn.vscode-lldb`（禁用之后照样崩过）。
+
+临时办法：`.vscode/launch.json` 里选「只加载本扩展（调试窗口会闪退时用）」，它带 `--disable-extensions`，调试窗口里只加载本插件。
+
+要继续查的话：服务端日志在 `~/.vscode-server/data/logs/<时间戳>/remoteagent.log`（搜 `SIGABRT`），宿主细节在同目录 `exthost<N>/remoteexthost.log`；想拿崩溃现场的原生调用栈，给远程 shell 的 `NODE_OPTIONS` 加上 `--report-on-signal --report-signal=SIGABRT --report-directory=/tmp`，复现后 node 会往那个目录写一份 `report.*.json`（里面有 `nativeStack` 和进程加载过的 `sharedObjects`）。
 
 **点运行，提示「没跑起来」。**
 大多是 node 版本低于 22，用 `maaNodeTest.nodePath` 指到 22+ 的 node。也可能是第一次运行要联网下载 MaaFW 失败，看「Maa 节点测试」输出面板里的 prepare 日志。
