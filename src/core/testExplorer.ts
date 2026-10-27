@@ -87,8 +87,8 @@ export function describeFileDescription(document: TestDocument, relativePath: st
 }
 
 /**
- * 建一棵文件节点描述。relativePath 用正斜杠、相对工作区根，作为节点标题，
- * 这样同名文件放在不同目录里也能分清。
+ * 建一棵文件节点描述。标题只用文件名 —— 目录层级由测试面板的目录节点负责，
+ * 文件名再带一遍完整路径就跟目录重复了。
  */
 export function buildFileNode(document: TestDocument, filePath: string, relativePath: string): FileNodeDescriptor {
     const cases: CaseNodeDescriptor[] = document.cases.map((entry) => ({
@@ -102,7 +102,7 @@ export function buildFileNode(document: TestDocument, filePath: string, relative
 
     return {
         id: fileNodeId(filePath),
-        label: toPosix(relativePath),
+        label: fileNameOf(relativePath),
         description: describeFileDescription(document, relativePath),
         // 文件级节点不指向具体内容，落在文件开头，点一下就是文件第一行
         start: 0,
@@ -114,6 +114,29 @@ export function buildFileNode(document: TestDocument, filePath: string, relative
 /** 相对路径统一用正斜杠显示，Windows 上也不会出现反斜杠 */
 export function toPosix(target: string): string {
     return target.replace(/\\/g, "/");
+}
+
+/** 相对路径里的文件名部分 */
+export function fileNameOf(relativePath: string): string {
+    const segments = toPosix(relativePath)
+        .split("/")
+        .filter((segment) => segment.length > 0);
+    return segments[segments.length - 1] ?? relativePath;
+}
+
+/**
+ * 把相对路径拆成「目录层级」，给测试面板分组用：去掉文件名，再去掉开头的 `tests` 段
+ * （所有测试都在 tests 下，留着这一层每一级都跟着一个没信息量的 tests）。
+ *
+ * 例：`tests/Common/Button/test_close_button.json` → `["Common", "Button"]`
+ */
+export function folderSegments(relativePath: string): string[] {
+    const segments = toPosix(relativePath)
+        .split("/")
+        .filter((segment) => segment.length > 0);
+    segments.pop();
+    if (segments[0] === "tests") segments.shift();
+    return segments;
 }
 
 function stripExtension(fileName: string): string {

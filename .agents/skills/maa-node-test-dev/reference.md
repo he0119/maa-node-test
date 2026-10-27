@@ -19,7 +19,7 @@
 | `core/hover.ts` | 拼 hover 的 Markdown 正文（绝对路径→URI 由回调注入，不 import vscode） |
 | `core/lens.ts` | 生成 CodeLens 描述 + 命令 id 常量 |
 | `core/runnerArgs.ts` | 拼 runner 参数、拼可打印命令行、拼运行标题 |
-| `core/testExplorer.ts` | 把测试文件翻成测试面板的树描述（id、label、description、range） |
+| `core/testExplorer.ts` | 把测试文件翻成测试面板的树描述（id、label、description、range）；`folderSegments()` 决定目录分组层级 |
 
 ### `runner/`
 
@@ -129,8 +129,9 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 
 ## 测试面板语义
 
-- **发现**：`findFiles` 扫 `test_*.json` 与 `test_*.jsonc`，按 `isTestFilePath()` 过滤；JSON 坏掉的跳过并 `console.warn`，不影响整个面板。保存文件后 300ms 防抖刷新。
-- **运行**：`collectTargets()` 决定跑什么 —— 没有 `include`（Run All）时每个文件一次；`include` 是文件节点时该文件一次；是用例节点时那一条一次。同一文件既有整文件又有单用例时，整文件优先去重。
+- **发现**：`findFiles` 扫 `test_*.json` 与 `test_*.jsonc`，按 `isTestFilePath()` 过滤；按相对路径排序后用 `folderSegments()` 建「目录 → 文件 → 用例」三层树（`tests` 这层省略，目录灰字是「含 N 个测试文件」）。JSON 坏掉的跳过并 `console.warn`，不影响整个面板。保存文件后 300ms 防抖刷新。
+- **节点的身份**：每个叶子节点（文件、用例）登记在 `leaves: Map<id, {filePath, relativePath, caseIndex?}>` 里，运行时只认这张表，不靠解析 id 字符串 —— 目录节点因此不需要挂 uri，也不会被误当成可运行的东西。
+- **运行**：`collectTargets()` 递归遍历选中的节点 —— 没有 `include`（Run All）时取全部叶子；目录节点展开成它下面每个文件各一次；文件节点一次；用例节点只跑那一条。同一文件既有整文件又有单用例时，整文件优先去重。
 - **串行**：多个目标用一个 promise 队列逐个跑，避免同时起一堆 MaaFW。
 - **取消**：`CancellationToken` → `process.cancel()`，被取消的标 skipped。
 - **整文件运行**：进程只给一个总结果，所以文件和它的子用例统一标记；失败信息提示「展开后单跑以定位」。

@@ -8,6 +8,8 @@ import {
     describeCaseLabel,
     describeFileDescription,
     fileNodeId,
+    fileNameOf,
+    folderSegments,
     toPosix,
 } from "./testExplorer";
 
@@ -65,7 +67,7 @@ test("建出来的文件节点：标题用相对路径，用例区间覆盖用�
     const node = buildFileNode(parsed, "/repo/tests/a/test_x.json", "tests/a/test_x.json");
 
     assert.equal(node.id, "/repo/tests/a/test_x.json#file");
-    assert.equal(node.label, "tests/a/test_x.json");
+    assert.equal(node.label, "test_x.json");
     assert.equal(node.cases.length, 3);
     assert.equal(node.cases[0].id, "/repo/tests/a/test_x.json#case-0");
     assert.deepEqual(
@@ -87,4 +89,26 @@ test("建出来的文件节点：标题用相对路径，用例区间覆盖用�
 test("toPosix 把反斜杠转成斜杠，测试面板标题在 Windows 上也不会难看", () => {
     assert.equal(toPosix("tests\\Common\\Button\\test_x.json"), "tests/Common/Button/test_x.json");
     assert.equal(toPosix("tests/Common/test_x.json"), "tests/Common/test_x.json");
+});
+
+test("fileNameOf 取路径最后一段", () => {
+    assert.equal(fileNameOf("tests/Common/Button/test_close_button.json"), "test_close_button.json");
+    assert.equal(fileNameOf("test_x.json"), "test_x.json");
+    assert.equal(fileNameOf("tests\\Windows\\test_x.json"), "test_x.json");
+});
+
+test("folderSegments：去掉文件名和开头的 tests 段，给出面板分组层级", () => {
+    assert.deepEqual(folderSegments("tests/Common/Button/test_close_button.json"), [
+        "Common",
+        "Button",
+    ]);
+    assert.deepEqual(folderSegments("tests/test_root.json"), []);
+    assert.deepEqual(folderSegments("tests/AutoDelivery/test_x.json"), [
+        "AutoDelivery",
+    ]);
+    // 不在 tests 下的文件名不该被误删（正常路径会被 isTestFilePath 拦住，这里只保证函数本身不炸）
+    assert.deepEqual(folderSegments("dev/other/test_x.json"), [
+        "dev",
+        "other",
+    ]);
 });

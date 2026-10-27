@@ -3,14 +3,14 @@ import * as vscode from "vscode";
 import {readNodeTestConfig, resolveNodeTestWorkspace} from "./config";
 import type {NodeTestWorkspace} from "./config";
 import {isTestFilePath, parseTestDocument} from "./core/document";
-import {buildFileNode} from "./core/testExplorer";
+import {buildFileNode, folderSegments} from "./core/testExplorer";
 import {describeCommand, startTestProcess} from "./runner";
 import type {RunRequest} from "./runner";
 
 /**
  * 把节点测试挂到 VS Code 的测试面板（Test Explorer）上：
- *   - 发现：扫 tests 目录下所有 test_*.json，文件一个根节点，每个用例一个子节点；
- *   - 运行：点文件节点跑整个文件（一次进程），点用例节点只跑这一条（一次进程，精确到用例）；
+ *   - 发现：扫 tests 目录下所有 test_*.json，按目录分组，每个文件一个节点、每个用例一个子节点；
+ *   - 运行：点目录节点跑它下面所有文件，点文件节点跑整个文件，点用例节点只跑这一条；
  *   - 结果：runner 的退出码翻译成通过 / 失败 / 未能运行 / 没有匹配用例。
  *
  * 为什么「跑整个文件」只起一次进程：runner 一次调用只能回答「这个文件里有没有失败的用例」，
@@ -27,23 +27,34 @@ const TEST_FILE_GLOBS = [
     "**/tests/**/test_*.jsonc",
 ];
 
-/** 从节点 id 里读用例下标：`<文件绝对路径>#case-<下标>` */
-const CASE_ID_PATTERN = /#case-(\d+)$/;
-
-interface RunTarget {
-    /** 测试面板上要标记结果的节点：整文件跑时是文件节点，单用例跑时是用例节点 */
-    item: vscode.TestItem;
+/** 叶子节点（文件或用例）的元信息。面板运行时靠它把节点还原成 runner 参数 */
+interface LeafInfo {
     /** 测试文件绝对路径 */
     filePath: string;
     /** 相对工作区根的路径，斜杠分隔 */
     relativePath: string;
-    /** 有值表示只跑这一条用例 */
+    /** 有值表示这是某一条用例的节点 */
     caseIndex?: number;
+}
+
+interface RunTarget extends LeafInfo {
+    /** 测试面板上要标记结果的节点：整文件跑时是文件节点，单用例跑时是用例节点 */
+    item: vscode.TestItem;
+}
+
+/** 扫描到的测试文件，解析结果在建树时复用，避免重复读盘 */
+interface TestFileEntry {
+    uri: vscode.Uri;
+    document: vscode.TextDocument;
+    parsed: ReturnType<typeof parseTestDocument>;
+    relativePath: string;
 }
 
 export class NodeTestExplorer implements vscode.Disposable {
     private readonly controller: vscode.TestController;
     private readonly disposables: vscode.Disposable[] = [];
+    /** 节点 id → 叶子信息。运行时只认这张表，不再靠解析 id 字符串 */
+    private readonly leaves = new Map<string, LeafInfo>();
     private refreshTimer: NodeJS.Timeout | undefined;
     /** 串行执行：一次测试运行里的多个目标逐个跑，避免同时起一堆 MaaFW 进程 */
     private queue: Promise<void> = Promise.resolve();
@@ -83,6 +94,7 @@ export class NodeTestExplorer implements vscode.Disposable {
     /** 重新扫描所有测试文件。清空后重建，保证和磁盘一致 */
     async refresh(): Promise<void> {
         this.controller.items.replace([]);
+        this.leaves.clear();
 
         const workspaceRoot = resolveNodeTestWorkspace()?.workspaceRoot;
         if (!workspaceRoot) {
@@ -90,7 +102,27 @@ export class NodeTestExplorer implements vscode.Disposable {
             return;
         }
 
+        const entries = await this.collectTestFiles(workspaceRoot);
+        // 按路径排序，目录和文件的顺序才稳定（VS Code 不会帮我们排）
+        entries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+
+        const dirItems = new Map<string, vscode.TestItem>();
+        const dirCounts = new Map<string, number>();
+        for (const entry of entries) this.addTestFile(entry, dirItems, dirCounts);
+
+        for (const [
+            dirPath,
+            item,
+        ] of dirItems) {
+            item.description = `含 ${dirCounts.get(dirPath) ?? 0} 个测试文件`;
+        }
+    }
+
+    /** 扫出所有测试文件并解析；坏掉的 JSON 跳过并留一句警告，不影响整个面板 */
+    private async collectTestFiles(workspaceRoot: string): Promise<TestFileEntry[]> {
+        const entries: TestFileEntry[] = [];
         const seen = new Set<string>();
+
         for (const glob of TEST_FILE_GLOBS) {
             let uris: vscode.Uri[];
             try {
@@ -99,48 +131,85 @@ export class NodeTestExplorer implements vscode.Disposable {
                 console.warn(`[maa-node-test] 扫描测试文件失败（${glob}）：${String(error)}`);
                 continue;
             }
+
             for (const uri of uris) {
                 if (uri.scheme !== "file" || seen.has(uri.fsPath)) continue;
                 seen.add(uri.fsPath);
-                await this.addFile(uri, workspaceRoot);
+
+                const relativePath = toPosix(path.relative(workspaceRoot, uri.fsPath));
+                if (!isTestFilePath(relativePath)) continue;
+
+                let document: vscode.TextDocument;
+                try {
+                    document = await vscode.workspace.openTextDocument(uri);
+                } catch (error) {
+                    console.warn(`[maa-node-test] 打不开 ${relativePath}：${String(error)}`);
+                    continue;
+                }
+
+                const parsed = parseTestDocument(document.getText());
+                if (parsed.problems.length > 0) {
+                    console.warn(`[maa-node-test] ${relativePath} 的 JSON 有语法错误，先跳过不显示`);
+                    continue;
+                }
+
+                entries.push({uri, document, parsed, relativePath});
             }
         }
+
+        return entries;
     }
 
-    /** 一个测试文件 → 一个根节点 + 若干用例子节点 */
-    private async addFile(uri: vscode.Uri, workspaceRoot: string): Promise<void> {
-        const relativePath = toPosix(path.relative(workspaceRoot, uri.fsPath));
-        if (!isTestFilePath(relativePath)) return;
+    /** 一个测试文件 → 目录节点（按需创建）+ 文件节点 + 用例节点 */
+    private addTestFile(
+        entry: TestFileEntry,
+        dirItems: Map<string, vscode.TestItem>,
+        dirCounts: Map<string, number>,
+    ): void {
+        const segments = folderSegments(entry.relativePath);
 
-        let document: vscode.TextDocument;
-        try {
-            document = await vscode.workspace.openTextDocument(uri);
-        } catch (error) {
-            console.warn(`[maa-node-test] 打不开 ${relativePath}：${String(error)}`);
-            return;
+        let parent: vscode.TestItemCollection = this.controller.items;
+        let dirPath = "";
+        for (const segment of segments) {
+            dirPath = dirPath ? `${dirPath}/${segment}` : segment;
+            dirCounts.set(dirPath, (dirCounts.get(dirPath) ?? 0) + 1);
+
+            let dirItem = dirItems.get(dirPath);
+            if (!dirItem) {
+                dirItem = this.controller.createTestItem(`maaNodeTest#dir:${dirPath}`, segment);
+                dirItem.canResolveChildren = false;
+                dirItems.set(dirPath, dirItem);
+                parent.add(dirItem);
+            }
+            parent = dirItem.children;
         }
 
-        const parsed = parseTestDocument(document.getText());
-        if (parsed.problems.length > 0) {
-            // 坏掉的 JSON 不进测试面板，但也不该把整个面板搞挂
-            console.warn(`[maa-node-test] ${relativePath} 的 JSON 有语法错误，先跳过不显示`);
-            return;
-        }
-
-        const fileNode = buildFileNode(parsed, uri.fsPath, relativePath);
-        const fileItem = this.controller.createTestItem(fileNode.id, fileNode.label, uri);
+        const fileNode = buildFileNode(entry.parsed, entry.uri.fsPath, entry.relativePath);
+        const fileItem = this.controller.createTestItem(fileNode.id, fileNode.label, entry.uri);
         fileItem.description = fileNode.description;
-        fileItem.range = new vscode.Range(document.positionAt(fileNode.start), document.positionAt(fileNode.end));
+        fileItem.range = new vscode.Range(
+            entry.document.positionAt(fileNode.start),
+            entry.document.positionAt(fileNode.end),
+        );
         fileItem.canResolveChildren = false;
+        this.leaves.set(fileItem.id, {filePath: entry.uri.fsPath, relativePath: entry.relativePath});
 
         for (const caseNode of fileNode.cases) {
-            const caseItem = this.controller.createTestItem(caseNode.id, caseNode.label, uri);
+            const caseItem = this.controller.createTestItem(caseNode.id, caseNode.label, entry.uri);
             caseItem.description = caseNode.description;
-            caseItem.range = new vscode.Range(document.positionAt(caseNode.start), document.positionAt(caseNode.end));
+            caseItem.range = new vscode.Range(
+                entry.document.positionAt(caseNode.start),
+                entry.document.positionAt(caseNode.end),
+            );
             fileItem.children.add(caseItem);
+            this.leaves.set(caseItem.id, {
+                filePath: entry.uri.fsPath,
+                relativePath: entry.relativePath,
+                caseIndex: caseNode.caseIndex,
+            });
         }
 
-        this.controller.items.add(fileItem);
+        parent.add(fileItem);
     }
 
     private scheduleRefresh(): void {
@@ -169,13 +238,13 @@ export class NodeTestExplorer implements vscode.Disposable {
                 return;
             }
 
-            const allFiles = [...this.controller.items].map(
+            const roots = [...this.controller.items].map(
                 ([
                     ,
                     item,
                 ]) => item,
             );
-            const targets = collectTargets(request, workspace.workspaceRoot, allFiles);
+            const targets = collectTargets(request, roots, this.leaves);
             if (targets.length === 0) {
                 await vscode.window.showWarningMessage(
                     "测试面板里没有可运行的用例：确认 tests 目录下有 test_*.json，且 JSON 没有语法错误。",
@@ -196,7 +265,7 @@ export class NodeTestExplorer implements vscode.Disposable {
         }
     }
 
-    /** 跑一个目标：整文件或单个用例 */
+    /** 跑一个目标：整个文件或单个用例 */
     private async runTarget(
         testRun: vscode.TestRun,
         target: RunTarget,
@@ -291,37 +360,48 @@ export function describeFailure(code: number | null, title: string): string {
 
 /**
  * 挑出这次测试运行要跑的目标：
- *   - 没有 include（Run All）→ 所有文件节点，每个文件跑一次；
- *   - include 里是文件节点 → 该文件跑一次；
- *   - include 里是用例节点 → 只跑那一条。
+ *   - 没有 include（Run All）→ 所有根节点下的叶子；
+ *   - include 是目录节点 → 它下面所有文件各跑一次；
+ *   - include 是文件节点 → 该文件跑一次；
+ *   - include 是用例节点 → 只跑那一条。
  * 同一个文件既要求整文件、又要求单用例时，整文件优先，避免同一批用例跑两遍。
  */
 export function collectTargets(
     request: vscode.TestRunRequest,
-    workspaceRoot: string,
-    allFileItems: readonly vscode.TestItem[],
+    rootItems: readonly vscode.TestItem[],
+    leaves: ReadonlyMap<string, LeafInfo>,
 ): RunTarget[] {
-    const excluded = new Set((request.exclude ?? []).map((item) => item.id));
+    const excludedIds = new Set((request.exclude ?? []).map((item) => item.id));
     const isExcluded = (item: vscode.TestItem): boolean =>
-        excluded.has(item.id) || (item.parent ? excluded.has(item.parent.id) : false);
+        excludedIds.has(item.id) || (item.parent ? excludedIds.has(item.parent.id) : false);
 
-    const included = request.include?.length ? request.include : allFileItems;
+    const included = request.include?.length ? request.include : rootItems;
     const fileTargets = new Map<string, RunTarget>();
     const caseTargets: RunTarget[] = [];
 
-    for (const item of included) {
-        if (isExcluded(item)) continue;
-        const filePath = item.uri?.fsPath;
-        if (!filePath) continue;
-        const relativePath = toPosix(path.relative(workspaceRoot, filePath));
+    const visit = (item: vscode.TestItem): void => {
+        if (isExcluded(item)) return;
 
-        const caseMatch = item.id.match(CASE_ID_PATTERN);
-        if (caseMatch) {
-            caseTargets.push({item, filePath, relativePath, caseIndex: Number(caseMatch[1])});
-        } else if (!fileTargets.has(filePath)) {
-            fileTargets.set(filePath, {item, filePath, relativePath});
+        const leaf = leaves.get(item.id);
+        if (leaf) {
+            if (leaf.caseIndex === undefined) {
+                if (!fileTargets.has(leaf.filePath)) {
+                    fileTargets.set(leaf.filePath, {...leaf, item});
+                }
+            } else {
+                caseTargets.push({...leaf, item});
+            }
+            return;
         }
-    }
+
+        for (const [
+            ,
+            child,
+        ] of item.children)
+            visit(child);
+    };
+
+    for (const item of included) visit(item);
 
     // 整文件已经覆盖到的用例不再单独跑
     const deduped = caseTargets.filter((target) => !fileTargets.has(target.filePath));
