@@ -72,6 +72,12 @@
                     "type": "string",
                     "default": "tests/MaaEndTestset",
                     "description": "测试截图根目录，相对工作区根目录。悬浮提示会在这个目录下按平台查找同名截图。"
+                },
+                "maaNodeTest.hoverImageWidth": {
+                    "type": "number",
+                    "default": 400,
+                    "minimum": 0,
+                    "markdownDescription": "悬浮预览里截图显示宽度（像素）。0 表示按原图尺寸显示。默认 400，看不清细节时点悬浮里的「打开原图」。"
                 }
             }
         }

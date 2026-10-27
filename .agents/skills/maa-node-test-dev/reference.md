@@ -146,7 +146,7 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 **帝江号_大世界.png** · 在 `tests/MaaEndTestset` 下找到 3 张（共 3 个平台/资源组合） · 本文件声明平台：Win32、ADB
 
 **ADB / Official_CN** · 1280×720 · [打开原图](file:///…)
-![](file:///…)
+<img src="file:///…" alt="ADB / Official_CN" width="400" height="225">
 
 **CloudADB / Official_CN** · 缺失
 ```
@@ -155,6 +155,8 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 - 行尾两个空格是 Markdown 硬换行，让图片紧跟描述；
 - 一个都没找到时只给一句人话提示（「没有任何平台包含 xxx.png…」），不铺空表格；
 - URI 里的括号要转义成 `%28`/`%29`，否则文件名带括号时链接会断。
+- **图片用 `<img>` 才能控制尺寸**：Markdown 图片语法没法指定大小，1280×720 会按原样铺开，占掉大半个悬浮框。宽度取 `maaNodeTest.hoverImageWidth`（默认 400），高度按 PNG 原比例算（读不出尺寸就不写 `height`）。用 HTML 的前提是 provider 里 `MarkdownString.supportHtml = true`，这个已经设了。
+- 把宽度设成 `0` 会回落到 `![](uri)` 的 Markdown 语法 —— 这是留给「某天 HTML 渲染出问题」的开关，别删。
 
 ## 测试面板语义
 

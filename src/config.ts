@@ -2,7 +2,7 @@ import {existsSync} from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
-/** 三个设置项，已经过默认值兜底和路径归一化（统一用正斜杠） */
+/** 设置项，已经过默认值兜底和路径归一化（统一用正斜杠） */
 export interface NodeTestConfig {
     /** node 可执行文件，可以是 `node` 也可以是绝对路径 */
     nodePath: string;
@@ -10,6 +10,8 @@ export interface NodeTestConfig {
     configPath: string;
     /** 测试截图根目录，相对工作区根 */
     testsetDir: string;
+    /** 悬浮里预览图的显示宽度，0 表示按原图尺寸 */
+    hoverImageWidth: number;
 }
 
 /** 设置 + 解析好的工作区根目录，命令和 hover 都从这里取 */
@@ -20,12 +22,15 @@ export interface NodeTestWorkspace {
     testsetDir: string;
     /** 测试集目录的绝对路径 */
     testsetRoot: string;
+    /** 悬浮里预览图的显示宽度，0 表示按原图尺寸 */
+    hoverImageWidth: number;
 }
 
 const SECTION = "maaNodeTest";
 const DEFAULT_NODE_PATH = "node";
 const DEFAULT_CONFIG_PATH = "maatools.config.mts";
 const DEFAULT_TESTSET_DIR = "tests/MaaEndTestset";
+const DEFAULT_HOVER_IMAGE_WIDTH = 400;
 
 /** 读三个设置项，空字符串当作没填 */
 export function readNodeTestConfig(): NodeTestConfig {
@@ -34,6 +39,7 @@ export function readNodeTestConfig(): NodeTestConfig {
         nodePath: nonEmpty(config.get<string>("nodePath")) ?? DEFAULT_NODE_PATH,
         configPath: toPosix(nonEmpty(config.get<string>("configPath")) ?? DEFAULT_CONFIG_PATH),
         testsetDir: toPosix(nonEmpty(config.get<string>("testsetDir")) ?? DEFAULT_TESTSET_DIR),
+        hoverImageWidth: readWidth(config.get<number>("hoverImageWidth")),
     };
 }
 
@@ -62,6 +68,12 @@ export function resolveNodeTestWorkspace(): NodeTestWorkspace | null {
         ? config.testsetDir
         : path.join(workspaceRoot, config.testsetDir);
     return {workspaceRoot, ...config, testsetRoot};
+}
+
+/** 宽度：没填或填了负数都回到默认值；0 是「按原图尺寸」，要保留 */
+function readWidth(value: number | undefined): number {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return DEFAULT_HOVER_IMAGE_WIDTH;
+    return Math.round(value);
 }
 
 function nonEmpty(value: string | undefined): string | undefined {

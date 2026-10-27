@@ -11,6 +11,11 @@ export interface ImageHoverInput {
     testsetExists: boolean;
     /** 按扫描结果逐个平台的查找结果 */
     locations: readonly ImageLocation[];
+    /**
+     * 预览图的显示宽度（像素）。0 表示按原图尺寸显示。
+     * 1280×720 的截图按原尺寸塞进悬浮会占掉半屏，默认缩到 400 宽，看不清再点「打开原图」。
+     */
+    imageWidth?: number;
 }
 
 /**
@@ -41,8 +46,9 @@ export function buildImageHoverMarkdown(input: ImageHoverInput, toUriString: (ab
         return blocks.join("\n\n");
     }
 
+    const imageWidth = input.imageWidth ?? DEFAULT_IMAGE_WIDTH;
     for (const location of input.locations) {
-        blocks.push(describeLocation(location, toUriString));
+        blocks.push(describeLocation(location, toUriString, imageWidth));
     }
     return blocks.join("\n\n");
 }
@@ -57,12 +63,38 @@ function describeControllers(controllers: readonly string[]): string {
     return `本文件声明平台：${controllers.join("、")}`;
 }
 
-function describeLocation(location: ImageLocation, toUriString: (absolutePath: string) => string): string {
+/** 默认预览宽度。原始截图是 1280×720，按原尺寸显示会占掉大半个悬浮框 */
+export const DEFAULT_IMAGE_WIDTH = 400;
+
+function describeLocation(
+    location: ImageLocation,
+    toUriString: (absolutePath: string) => string,
+    imageWidth: number,
+): string {
     const label = location.resource ? `**${location.platform} / ${location.resource}**` : `**${location.platform}**`;
     if (!location.filePath) return `${label} · 缺失`;
 
     const uri = toUriString(location.filePath);
     const size = location.size ? `${location.size.width}×${location.size.height}` : "尺寸读不出来";
     // 行尾两个空格是 Markdown 硬换行，让图片紧跟在描述下面一行
-    return `${label} · ${size} · [打开原图](${uri})  \n![](${uri})`;
+    return `${label} · ${size} · [打开原图](${uri})  \n${renderImage(location, uri, imageWidth)}`;
+}
+
+/**
+ * 生成图片那一行。
+ *
+ * 宽度可控时用 HTML `<img>`：Markdown 图片语法没法指定尺寸，1280×720 的图会按原尺寸铺开。
+ * 用 `<img>` 需要 hover 那边打开 `MarkdownString.supportHtml`（providers/hover.ts 里有）。
+ * 设成 0 就回落到 Markdown 语法，万一哪天 HTML 渲染出问题，用户还有个开关能自救。
+ */
+function renderImage(location: ImageLocation, uri: string, imageWidth: number): string {
+    const alt = location.resource ? `${location.platform} / ${location.resource}` : location.platform;
+    if (!Number.isFinite(imageWidth) || imageWidth <= 0) return `![${alt}](${uri})`;
+
+    // 高度按原图比例算，占位稳定；读不出尺寸就不写 height，让它自己撑开
+    const height =
+        location.size && location.size.width > 0
+            ? ` height="${Math.round((imageWidth * location.size.height) / location.size.width)}"`
+            : "";
+    return `<img src="${uri}" alt="${alt}" width="${Math.round(imageWidth)}"${height}>`;
 }

@@ -54,7 +54,7 @@ node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
 1. **`src/core/` 不许 import `vscode`**：这一层的价值就是能在普通 Node 里单测，混进 vscode 就废了。
 2. **runner 的命令行、`RESULT-FILE` 行与退出码是契约**，扩展和 runner 分别维护，任何一侧改动都要同步：`runner/lib/args.mjs`（参数）、`runner/lib/results.mjs`（`RESULT-FILE` / `RESULT-CASE` 格式与判定）、`src/core/runnerArgs.ts`（拼参数）、`src/core/testResult.ts`（解析结论行与失败文案）、`src/testing.ts`（把结论标记到面板节点），外加 `reference.md` 的契约段（README 只写用法，不放契约）。
 3. **不要写死平台名**（`Win32` / `ADB` / `Official_CN`）：平台与资源目录一律从测试集目录扫描得到，新加控制器才不用改代码。
-4. **hover 里的图片用 Markdown 图片语法**（`![](file:///…)`），不用 HTML `<img>`：Markdown 语法在悬浮里稳定可见，HTML 会被过滤规则牵着走。
+4. **hover 里的图片默认用 HTML `<img width>`，宽度可配**：Markdown 图片语法给不了尺寸，1280×720 会按原样铺开占掉大半个悬浮框。代价是依赖 `MarkdownString.supportHtml`（provider 里已开），所以留了开关：`maaNodeTest.hoverImageWidth` 设 `0` 就回落到 `![](uri)`。「打开原图」链接在任何情况下都要保留。
 5. **`.code-workspace` 必须保持纯 JSON**（不带尾逗号），它已在 `.prettierignore` 里，别为了「格式化」把它改坏。
 6. **判定语义不能想当然**：`maa-tools` 遇到不存在的截图只打印 `not exists, ignored` 然后跳过，跳过即视为通过 —— 任何新逻辑都不能把「没验证」当成「通过」。
 7. **运行时依赖只能进 `dist/`，不能进 `dependencies`**：vsce 在 pnpm 仓库里解析不了生产依赖，包必须自包含。要加运行时依赖就改 `scripts/bundle.mjs` 让它被打进去（同时保持 `dependencies` 为空），否则装到 VS Code 里会 `Cannot find module`。

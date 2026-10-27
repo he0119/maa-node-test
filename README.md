@@ -112,7 +112,7 @@ pnpm run compile
 **帝江号_大世界.png** · 在 `tests/MaaEndTestset` 下找到 3 张（共 3 个平台/资源组合） · 本文件声明平台：Win32、ADB
 
 **ADB / Official_CN** · 1280×720 · [打开原图](file:///…)
-![](file:///…)
+（这里是一张预览图，默认宽 400）
 
 **CloudADB / Official_CN** · 缺失
 ```
@@ -138,6 +138,7 @@ pnpm run compile
 | `maaNodeTest.nodePath` | `node` | 跑测试用的 node。要求 22+；不在 PATH 里就填绝对路径 |
 | `maaNodeTest.configPath` | `maatools.config.mts` | maa-tools 配置文件，相对工作区根。用来认定哪个工作区文件夹是「仓库根」 |
 | `maaNodeTest.testsetDir` | `tests/MaaEndTestset` | 截图根目录，相对工作区根。悬浮预览按它扫描平台目录 |
+| `maaNodeTest.hoverImageWidth` | `400` | 悬浮里预览图的显示宽度（像素）。`0` 表示按原图尺寸 |
 
 ## 常见问题
 
