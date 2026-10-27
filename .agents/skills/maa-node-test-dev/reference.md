@@ -161,6 +161,7 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 ```
 
 - 平台/资源组合来自扫描 `maaNodeTest.testsetDir`，不写死；
+- **顺序按本文件 `configs.controller` 声明来**（`orderLocations()`）：扫描顺序是目录名字母序（ADB、CloudADB、Win32），跟文件里写的平台顺序对不上，看的时候容易串行；没声明的平台按扫描顺序接在后面，别名先经 `controllerDirs` 换成目录名再排名次；
 - 行尾两个空格是 Markdown 硬换行，让图片紧跟描述；
 - 一个都没找到时只给一句人话提示（「没有任何平台包含 xxx.png…」），不铺空表格；
 - URI 里的括号要转义成 `%28`/`%29`，否则文件名带括号时链接会断。

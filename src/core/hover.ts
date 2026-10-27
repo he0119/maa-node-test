@@ -49,7 +49,8 @@ export function buildImageHoverMarkdown(input: ImageHoverInput, toUriString: (ab
     }
 
     const imageWidth = input.imageWidth ?? DEFAULT_IMAGE_WIDTH;
-    for (const location of input.locations) {
+    // 按本文件 configs.controller 的顺序排，读起来跟文件里写的平台顺序一致
+    for (const location of orderLocations(input)) {
         blocks.push(describeLocation(location, toUriString, imageWidth));
     }
 
@@ -59,6 +60,25 @@ export function buildImageHoverMarkdown(input: ImageHoverInput, toUriString: (ab
     }
 
     return blocks.join("\n\n");
+}
+
+/**
+ * 排序：先按本文件声明的 controller 顺序，再把没声明的平台按扫描顺序接在后面。
+ * 扫描顺序是目录名字母序（ADB、CloudADB、Win32），跟文件里写的 `["Win32", "ADB", "CloudADB"]`
+ * 对不上，看的时候容易串行。
+ */
+function orderLocations(input: ImageHoverInput): ImageLocation[] {
+    if (input.controllers.length === 0) return [...input.locations];
+
+    const dirOf = (controller: string): string => input.controllerDirs?.get(controller) ?? controller;
+    const declared = input.controllers.map(dirOf);
+    const rankOf = (platform: string): number => {
+        const index = declared.indexOf(platform);
+        return index < 0 ? declared.length : index;
+    };
+
+    // sort 是稳定的：同样名次的平台保持原来的扫描顺序
+    return [...input.locations].sort((left, right) => rankOf(left.platform) - rankOf(right.platform));
 }
 
 /** 本文件声明了、但测试集里没扫到的平台（名字对不上或目录缺失） */

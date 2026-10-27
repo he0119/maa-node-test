@@ -215,3 +215,67 @@ test("hover 文本：controller 是别名时不误报「没有这个平台的目
 
     assert.equal(markdown.includes("没有这个平台的目录"), false);
 });
+
+test("hover 文本：平台顺序跟本文件声明的 controller 一致，不按目录名字母序", () => {
+    const markdown = buildImageHoverMarkdown(
+        {
+            imageName: "帝江号_大世界.png",
+            // 文件里写的是 Win32 先，扫描顺序却是 ADB、CloudADB、Win32
+            controllers: [
+                "Win32",
+                "ADB",
+                "CloudADB",
+            ],
+            testsetLabel: TESTSET_LABEL,
+            testsetExists: true,
+            locations: [
+                found("ADB", "Official_CN", CLOUD_PNG, 1280, 720),
+                found("CloudADB", "Official_CN", CLOUD_PNG, 1280, 720),
+                found("Win32", "Official_CN", WANG32_PNG, 1280, 720),
+            ],
+        },
+        toUri,
+    );
+
+    const platforms = markdown
+        .split("\n\n")
+        .slice(1)
+        .map((block) => /\*\*([^*]+)\*\*/.exec(block)?.[1]);
+    assert.deepEqual(platforms, [
+        "Win32 / Official_CN",
+        "ADB / Official_CN",
+        "CloudADB / Official_CN",
+    ]);
+});
+
+test("hover 文本：没声明的平台排在后面，别名按目录名对号入座", () => {
+    const markdown = buildImageHoverMarkdown(
+        {
+            imageName: "帝江号_大世界.png",
+            controllers: ["Win32-Front"],
+            testsetLabel: TESTSET_LABEL,
+            testsetExists: true,
+            locations: [
+                found("ADB", "Official_CN", CLOUD_PNG, 1280, 720),
+                found("Win32", "Official_CN", WANG32_PNG, 1280, 720),
+            ],
+            controllerDirs: new Map([
+                [
+                    "Win32-Front",
+                    "Win32",
+                ],
+            ]),
+        },
+        toUri,
+    );
+
+    const platforms = markdown
+        .split("\n\n")
+        .slice(1)
+        .map((block) => /\*\*([^*]+)\*\*/.exec(block)?.[1]);
+    // Win32-Front 声明在前 → Win32 那张排第一；没声明的 ADB 跟在后面
+    assert.deepEqual(platforms, [
+        "Win32 / Official_CN",
+        "ADB / Official_CN",
+    ]);
+});
