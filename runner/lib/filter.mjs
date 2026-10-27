@@ -31,32 +31,62 @@ export function groupLabel(group) {
     return `${configs.controller}-${configs.resource}`;
 }
 
+/** 这个组是否可能属于该 target（controller / resource / 组名后缀三条） */
+export function groupMatchesTarget(group, target) {
+    const configs = group?.configs ?? {};
+    if (!target.controllers.includes(configs.controller)) return false;
+    if (!target.resources.includes(configs.resource)) return false;
+    // 目标文件没写 configs.name 就不校验组名后缀：此时组名是 `(controller-resource)<unnamed>`，不该拿来比。
+    if (target.name && !(typeof configs.name === "string" && configs.name.endsWith(`)${target.name}`))) return false;
+    return true;
+}
+
 /**
- * 过滤测试组。返回新数组、新组对象、新 cases 数组，绝不就地修改传入的对象 ——
- * 调用方（包括 runTest 内部）可能还拿着原对象，就地改会很难排查。
+ * 批量过滤：一张组表，多个目标文件。
+ *
+ * entries 形如 [{ key, target }]，key 用来在结果里区分是哪个文件（入口传相对路径）。
+ * 返回：
+ *   groups —— 过滤后的组（新对象、新 cases 数组，绝不就地修改入参）
+ *   owners —— 组名 → 这个组覆盖了哪些目标文件（跑完之后按组判定结果时用）
+ *
+ * 一个组可能同时被多个目标文件命中（它们复用了同一批截图，controller/resource/name 又恰好相同），
+ * 这时组里的用例是两份的并集，owners 也记两边的 key —— 判定结果时两个文件一起承担。
+ */
+export function filterGroupsForFiles(groups, entries) {
+    const safeGroups = Array.isArray(groups) ? groups : [];
+    const safeEntries = Array.isArray(entries) ? entries : [];
+    const owners = new Map();
+    const kept = [];
+
+    for (const group of safeGroups) {
+        const matched = safeEntries.filter((entry) => groupMatchesTarget(group, entry.target));
+        if (matched.length === 0) continue;
+
+        const keys = new Set();
+        for (const entry of matched) for (const key of entry.target.caseKeys) keys.add(key);
+
+        const cases = Array.isArray(group.cases) ? group.cases.filter((testCase) => keys.has(caseKey(testCase))) : [];
+        if (cases.length === 0) continue;
+
+        // 只有真正贡献了用例的文件才算这个组的「负责人」：
+        // 若某个文件命中组名条件但一条用例都没留下，说明这个组其实是别人的。
+        const caseKeys = cases.map((testCase) => caseKey(testCase));
+        const contributing = matched.filter((entry) => caseKeys.some((key) => entry.target.caseKeys.includes(key)));
+        if (contributing.length === 0) continue;
+
+        kept.push({...group, cases});
+        const name = groupName(group);
+        if (!owners.has(name)) owners.set(name, new Set());
+        for (const entry of contributing) owners.get(name).add(entry.key);
+    }
+
+    return {groups: kept, owners};
+}
+
+/**
+ * 单个文件的过滤，返回过滤后的组。等价于只有一个 entry 的 filterGroupsForFiles。
+ * 保留这个签名是为了让调用方和单测读起来更直白。
  */
 export function filterGroups(groups, target) {
-    if (!Array.isArray(groups)) return [];
-
-    const controllers = new Set(target?.controllers ?? []);
-    const resources = new Set(target?.resources ?? []);
-    const caseKeys = new Set(target?.caseKeys ?? []);
-    // 目标文件没写 configs.name 就不校验组名后缀：此时组名是 `(controller-resource)<unnamed>`，不该拿来比。
-    const nameSuffix = target?.name ? `)${target.name}` : null;
-
-    const kept = [];
-    for (const group of groups) {
-        const configs = group?.configs ?? {};
-
-        if (!controllers.has(configs.controller)) continue;
-        if (!resources.has(configs.resource)) continue;
-        if (nameSuffix !== null && !(typeof configs.name === "string" && configs.name.endsWith(nameSuffix))) continue;
-
-        const cases = Array.isArray(group.cases) ? group.cases : [];
-        const matchedCases = cases.filter((testCase) => caseKeys.has(caseKey(testCase)));
-        if (matchedCases.length === 0) continue;
-
-        kept.push({...group, cases: matchedCases});
-    }
-    return kept;
+    return filterGroupsForFiles(groups, [{key: null, target}]).groups;
 }

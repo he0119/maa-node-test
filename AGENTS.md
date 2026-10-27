@@ -49,7 +49,7 @@ node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
 ## 硬约束
 
 1. **`src/core/` 不许 import `vscode`**：这一层的价值就是能在普通 Node 里单测，混进 vscode 就废了。
-2. **runner 的命令行与退出码是契约**，扩展和 runner 分别维护，任何一侧改动都要三处同步：`runner/lib/args.mjs` + `src/core/runnerArgs.ts` + `src/testing.ts` 的退出码映射，外加 README 的表格和 `reference.md`。
+2. **runner 的命令行、`RESULT-FILE` 行与退出码是契约**，扩展和 runner 分别维护，任何一侧改动都要同步：`runner/lib/args.mjs`（参数）、`runner/lib/results.mjs`（`RESULT-FILE` 格式与判定）、`src/core/runnerArgs.ts`（拼参数）、`src/testing.ts`（解析 `RESULT-FILE` 与退出码映射），外加 README 的表格和 `reference.md`。
 3. **不要写死平台名**（`Win32` / `ADB` / `Official_CN`）：平台与资源目录一律从测试集目录扫描得到，新加控制器才不用改代码。
 4. **hover 里的图片用 Markdown 图片语法**（`![](file:///…)`），不用 HTML `<img>`：Markdown 语法在悬浮里稳定可见，HTML 会被过滤规则牵着走。
 5. **`.code-workspace` 必须保持纯 JSON**（不带尾逗号），它已在 `.prettierignore` 里，别为了「格式化」把它改坏。

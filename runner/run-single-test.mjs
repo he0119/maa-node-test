@@ -1,25 +1,37 @@
 #!/usr/bin/env node
-// 只跑 Maa 节点测试的一个文件（或其中一个用例）。
+// 只跑 Maa 节点测试里指定的一批文件（或其中一个用例）。
 //
 // @nekosu/maa-tools 只提供全量 `maa-tools test`，没有过滤参数。这里走同一套库函数：
 //   1. loadConfig 加载 maatools.config.mts（会连带执行 tests/scripts/loader.mts 的 fetchCases）；
 //   2. 把 cfg.test.cases 换成包装函数，用 lib/filter.mjs 只留下目标文件的组和用例；
-//   3. 自己做截图存在性预检（maa-tools 遇到不存在的图只打印 ignored 就跳过，会让「一张图都没有」也判通过）；
-//   4. 调 runTest(cfg)，把结果翻译成「RESULT 行 + 退出码」这套固定接口。
+//   3. 自己做截图存在性预检（maa-tools 遇到不存在的图只打印 ignored 就跳过，「一张图都没有」也会判通过）；
+//   4. 调 runTest(cfg)，把结果翻译成「RESULT-FILE 逐文件结论 + RESULT 整批结论 + 退出码」这套固定接口。
+//
+// 为什么允许一次给多个 --file：MaaFW 初始化和 assets 加载占了单次运行的大头（实测单文件 4~5 秒，
+// 真正的识别只占其中一小部分）。一个文件一个进程等于把这份固定开销重复几十次；批量跑只付一次。
+// 代价是 runTest 只返回整批的一个布尔值，所以逐文件结论靠解析它打印的组名（见 lib/results.mjs）。
 //
 // 参数与退出码见 lib/args.mjs 的 USAGE。
 
 import {closeSync, existsSync, openSync, readFileSync, readSync, statSync} from "node:fs";
 import path from "node:path";
 
-import {DEFAULT_CONFIG, USAGE, UsageError, parseArgs} from "./lib/args.mjs";
+import {USAGE, UsageError, parseArgs} from "./lib/args.mjs";
 import {caseKey, hitNodeNames} from "./lib/case-key.mjs";
-import {filterGroups, groupLabel, groupName} from "./lib/filter.mjs";
+import {filterGroupsForFiles, groupLabel, groupName} from "./lib/filter.mjs";
 import {countImages, scanImages} from "./lib/images.mjs";
 import {MaaToolsLoadError, describeMaaToolsSource, importMaaTools} from "./lib/maa-tools.mjs";
 import {displayPath, resolveFromWorkspace, toPosix} from "./lib/paths.mjs";
 import {readPngSize} from "./lib/png.mjs";
 import {printResult} from "./lib/report.mjs";
+import {
+    aggregateFileResults,
+    attributeGroupResults,
+    formatFileResultLine,
+    hasAnyAttributedGroup,
+    normalizeFileResults,
+    overallVerdict,
+} from "./lib/results.mjs";
 import {
     CaseIndexOutOfRangeError,
     TestFileError,
@@ -52,35 +64,40 @@ async function run() {
     if (!existsSync(configPath)) {
         throw new FatalError(
             `找不到 maatools 配置文件：${configPath}\n` +
-                `--config 是相对仓库根的路径，默认 ${DEFAULT_CONFIG}；请检查 --workspace 是否指对了仓库根。`,
+                `--config 是相对仓库根的路径，默认 maatools.config.mts；请检查 --workspace 是否指对了仓库根。`,
         );
     }
 
-    const filePath = resolveFromWorkspace(workspace, args.file);
-    if (!existsSync(filePath)) throw new FatalError(`找不到测试文件：${filePath}`);
+    // 先把目标文件全读一遍再做重量级的配置加载：文件写错时能立刻报错，不用等十几秒。
+    const entries = [];
+    for (const rawFile of args.files) {
+        const filePath = resolveFromWorkspace(workspace, rawFile);
+        if (!existsSync(filePath)) throw new FatalError(`找不到测试文件：${filePath}`);
 
-    // 先读目标文件再做重量级的配置加载：文件写错时能立刻报错，不用等十几秒。
-    let testFile;
-    try {
-        testFile = normalizeTestFile(parseTestFile(readFileSync(filePath, "utf8")));
-    } catch (error) {
-        if (error instanceof TestFileError) {
-            throw new FatalError(`${displayPath(workspace, filePath)}：${error.message}`);
+        let testFile;
+        try {
+            testFile = normalizeTestFile(parseTestFile(readFileSync(filePath, "utf8")));
+        } catch (error) {
+            if (error instanceof TestFileError) {
+                throw new FatalError(`${displayPath(workspace, filePath)}：${error.message}`);
+            }
+            throw error;
         }
-        throw error;
-    }
 
-    let target;
-    try {
-        target = buildTarget(testFile, args.caseIndex);
-    } catch (error) {
-        if (error instanceof CaseIndexOutOfRangeError) {
-            // 用例下标合法但文件里没有这一条 —— 按「过滤后没有可跑用例」处理（退出码 3）。
-            console.error(`${displayPath(workspace, filePath)}：${error.message}`);
-            console.error("没有可运行的用例，什么也没做。");
-            return "empty";
+        let target;
+        try {
+            target = buildTarget(testFile, args.caseIndex);
+        } catch (error) {
+            if (error instanceof CaseIndexOutOfRangeError) {
+                // 用例下标合法但文件里没有这一条 —— 按「过滤后没有可跑用例」处理（退出码 3）。
+                console.error(`${displayPath(workspace, filePath)}：${error.message}`);
+                console.error("没有可运行的用例，什么也没做。");
+                return "empty";
+            }
+            throw error;
         }
-        throw error;
+
+        entries.push({key: displayPath(workspace, filePath), filePath, testFile, target});
     }
 
     let maaTools;
@@ -117,39 +134,45 @@ async function run() {
     cfg.mode = "stdio";
 
     // 包装 cfg.test.cases：maa-tools 调它拿全量组，我们在这里就地过滤。
-    // 结果缓存一份：这个函数要扫一遍整个 tests/ 目录（几十个文件、上百条用例），
-    // 我们判断是否有匹配要用一次，runTest 内部还要用一次，不缓存就白扫两遍。
+    // 结果缓存一份，避免「我们调一次、runTest 再调一次」重复扫描整个 tests/ 目录（每次几百毫秒到几秒）。
     const originalCases = cfg.test.cases;
-    let cachedGroups = null;
+    let filtered = null;
     cfg.test.cases = async () => {
-        if (cachedGroups === null) {
-            cachedGroups = (async () => {
+        if (filtered === null) {
+            filtered = (async () => {
                 const resolved = typeof originalCases === "function" ? await originalCases() : originalCases;
-                return filterGroups(Array.isArray(resolved) ? resolved : [], target);
+                return filterGroupsForFiles(Array.isArray(resolved) ? resolved : [], entries);
             })();
         }
-        return cachedGroups;
+        const result = await filtered;
+        return result.groups;
     };
 
-    let groups;
+    let selection;
     try {
-        groups = await cfg.test.cases();
+        // 触发一次全量扫描 + 过滤：结果被缓存进 filtered，runTest 里再调就是同一份。
+        await cfg.test.cases();
+        selection = await filtered;
     } catch (error) {
         throw new FatalError(`按目标文件过滤测试组时出错（配置里的 test.cases 执行失败）：\n${errorText(error)}`);
     }
 
-    const relativeFile = displayPath(workspace, filePath);
-    const caseText =
-        args.caseIndex === null
-            ? `全部用例，共 ${testFile.cases.length} 个`
-            : `用例下标 ${args.caseIndex}（第 ${args.caseIndex + 1} 个），共 ${testFile.cases.length} 个`;
-    console.log(`运行 ${relativeFile}（${caseText}）`);
+    const {groups, owners} = selection;
+    const singleFile = entries.length === 1;
+    const caseText = singleFile
+        ? args.caseIndex === null
+            ? `全部用例，共 ${entries[0].testFile.cases.length} 个`
+            : `用例下标 ${args.caseIndex}（第 ${args.caseIndex + 1} 个），共 ${entries[0].testFile.cases.length} 个`
+        : "各自全部用例";
+    console.log(
+        singleFile ? `运行 ${entries[0].key}（${caseText}）` : `批量运行 ${entries.length} 个测试文件（${caseText}）`,
+    );
     console.log(`配置 ${displayPath(workspace, configPath)}`);
     console.log(`库：${describeMaaToolsSource(maaToolsSource, workspace)}`);
 
     if (groups.length === 0) {
         console.error(
-            `没有匹配到任何测试组：${relativeFile} 里声明的 controller/resource/用例，在 maa-tools 展开的结果里一组都没对上。\n` +
+            `没有匹配到任何测试组：这些文件里声明的 controller/resource/用例，在 maa-tools 展开的结果里一组都没对上。\n` +
                 `常见原因：configs.controller 或 configs.resource 写错（必须是 tests/scripts/loader.mts 里映射过的值）、` +
                 `用例键（image + hits）在展开后被改变。`,
         );
@@ -160,9 +183,10 @@ async function run() {
 
     const scan = scanImages(cfg, groups);
     const stats = countImages(scan);
+    const perFile = summarizePerFile(scan, owners, entries);
 
     if (args.dryRun) {
-        printPlan(scan, testFile.cases, args.caseIndex);
+        printPlan(scan);
     } else {
         for (const entry of scan) {
             for (const item of entry.images) {
@@ -182,8 +206,7 @@ async function run() {
             for (const item of entry.images) console.error(`  ${item.path}`);
         }
         console.error(
-            `截图根目录是 ${path.resolve(cfg.cwd, cfg.test.casesCwd ?? ".")}，` +
-                "请确认截图已放到对应 controller/resource 目录下。",
+            `截图根目录是 ${path.resolve(cfg.cwd, cfg.test.casesCwd ?? ".")}，请确认截图已放到对应 controller/resource 目录下。`,
         );
         return "error";
     }
@@ -200,6 +223,7 @@ async function run() {
     if (args.dryRun) {
         console.log("");
         console.log("dry-run 结束：只做了解析、过滤和截图检查，没有加载 MaaFW，也没有执行识别。");
+        console.log(`本次会跑 ${groups.length} 组、${stats.total} 张截图（${entries.length} 个文件）`);
         return "pass";
     }
 
@@ -209,21 +233,11 @@ async function run() {
     console.log("");
     console.log("开始运行，下面是 maa-tools 自己的输出（进度百分比会混在里面）：");
 
-    // maa-tools 在 setupMaa 失败 / assets/interface.json 加载失败时同样返回 false，而且不打印任何组名；
-    // 真正的测试失败一定会打印出组名（失败的组红色、通过的组绿色）。用这一点把「没跑起来」和「跑失败」分开。
-    const knownGroupNames = groups.map((group) => groupName(group));
-    let sawGroupLine = false;
+    // 边跑边把 stdout 抄一份：跑完之后按组名把结论分发回每个文件（runTest 只给整批一个布尔值）。
+    const captured = [];
     const originalLog = console.log;
     console.log = (...items) => {
-        if (!sawGroupLine) {
-            const line = items.map((item) => String(item)).join(" ");
-            for (const name of knownGroupNames) {
-                if (line.includes(name)) {
-                    sawGroupLine = true;
-                    break;
-                }
-            }
-        }
+        captured.push(items.map((item) => String(item)).join(" "));
         originalLog(...items);
     };
 
@@ -241,9 +255,23 @@ async function run() {
         console.log(`错误详情：${detailsPath}${changed ? "" : "（本次运行没有更新它，可能是更早一次运行留下的）"}`);
     }
 
-    if (ok === true) return "pass";
+    const groupNames = groups.map((group) => groupName(group));
+    const verdicts = attributeGroupResults(captured, groupNames);
+    const fileResults = normalizeFileResults(
+        aggregateFileResults(
+            owners,
+            verdicts,
+            entries.map((entry) => entry.key),
+        ),
+    );
 
-    if (!sawGroupLine) {
+    // 截图一张都没有的文件、以及压根没匹配到组的文件，结果都不可信，统一按 error 报，别让它显示成「通过」。
+    for (const entry of entries) {
+        const summary = perFile.get(entry.key);
+        if (!summary || summary.total === 0 || summary.existing === 0) fileResults.set(entry.key, "error");
+    }
+
+    if (ok !== true && !hasAnyAttributedGroup(verdicts)) {
         throw new FatalError(
             "maa-tools 没有执行任何用例（没有打印出任何测试组名），不是「用例失败」而是「根本没跑起来」。\n" +
                 "常见原因：MaaFW 准备失败（首次运行需要联网下载到 ~/.maa-tools，可看上面 maa-tools 的 prepare 日志）、" +
@@ -251,21 +279,48 @@ async function run() {
         );
     }
 
-    return "fail";
+    console.log("");
+    console.log("按文件结果：");
+    for (const entry of entries) {
+        const verdict = fileResults.get(entry.key) ?? "error";
+        console.log(`  ${verdictMark(verdict)} ${entry.key}`);
+    }
+
+    for (const entry of entries) {
+        console.log(formatFileResultLine(entry.key, fileResults.get(entry.key) ?? "error"));
+    }
+
+    return overallVerdict(fileResults);
 }
 
-/** dry-run 的计划：每组、每个用例、截图与命中节点都列清楚。 */
-function printPlan(scan, fileCases, caseIndex) {
-    // 用例编号用「文件里的下标」（也就是 --case 的取值），不是组内序号，免得带 --case 时显示成 0 让人误会。
-    // 没传 --case 时按用例键反查它在文件里的位置；同一文件里键重复时取第一次出现的位置。
-    const indexByKey = new Map();
-    if (caseIndex === null) {
-        fileCases.forEach((testCase, index) => {
-            const key = caseKey(testCase);
-            if (!indexByKey.has(key)) indexByKey.set(key, index);
+/** 每个文件一共涉及几张截图、其中几张真的存在（用于判断这个文件到底有没有被验证到） */
+function summarizePerFile(scan, owners, entries) {
+    const summary = new Map(
+        entries.map((entry) => [
+            entry.key,
+            {total: 0, existing: 0},
+        ]),
+    );
+
+    for (const item of scan) {
+        const ownerKeys = owners.get(groupName(item.group)) ?? new Set();
+        item.group.cases.forEach((testCase, index) => {
+            const image = item.images[index];
+            for (const entry of entries) {
+                if (!ownerKeys.has(entry.key)) continue;
+                if (!entry.target.caseKeys.includes(caseKey(testCase))) continue;
+                const slot = summary.get(entry.key);
+                slot.total += 1;
+                if (image.exists) slot.existing += 1;
+            }
         });
     }
 
+    return summary;
+}
+
+/** dry-run 的计划：每组、每个用例、截图与命中节点都列清楚。 */
+function printPlan(scan) {
     console.log("");
     console.log("运行计划（dry-run：只解析、过滤、检查截图，不加载 MaaFW，不执行识别）：");
     for (const entry of scan) {
@@ -276,12 +331,11 @@ function printPlan(scan, fileCases, caseIndex) {
                 `imageRoot=${group.configs.imageRoot ?? "."}`,
         );
         group.cases.forEach((testCase, index) => {
-            const fileIndex = caseIndex === null ? (indexByKey.get(caseKey(testCase)) ?? index) : caseIndex;
             const item = entry.images[index];
             const nodes = hitNodeNames(testCase.hits);
             const hitsText = nodes.length === 0 ? "负例，不期望命中任何节点" : nodes.join(", ");
             const mark = item.exists ? `✓${imageSizeText(item.path)}` : "✗ 文件不存在";
-            console.log(`    用例 ${fileIndex}：image=${item.image}`);
+            console.log(`    用例 ${index}：image=${item.image}`);
             console.log(`        hits=${hitsText}`);
             console.log(`        截图：${imageRef(group, item.image)} ${mark}`);
             if (!item.exists) console.log(`        期望路径：${item.path}`);
@@ -292,6 +346,12 @@ function printPlan(scan, fileCases, caseIndex) {
 /** 截图在日志里的显示路径：相对 casesCwd 的 imageRoot/image。 */
 function imageRef(group, image) {
     return toPosix(path.join(group.configs.imageRoot ?? ".", image));
+}
+
+function verdictMark(verdict) {
+    if (verdict === "pass") return "✓";
+    if (verdict === "fail") return "✗";
+    return "！";
 }
 
 /** PNG 尺寸，例如「（1280x720）」；读不出来就给个说明，不影响流程。 */

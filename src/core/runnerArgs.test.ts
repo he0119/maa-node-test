@@ -1,6 +1,6 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
-import {buildRunTitle, buildRunnerArgs, formatCommandLine, quoteArgument} from "./runnerArgs";
+import {buildBatchRunTitle, buildRunTitle, buildRunnerArgs, formatCommandLine, quoteArgument} from "./runnerArgs";
 
 const BASE = {
     runnerScriptPath: "/home/someone/.vscode/extensions/maa.node-test-0.1.0/runner/run-single-test.mjs",
@@ -74,5 +74,39 @@ test("标题用相对路径，跑单例时补「第 N 个用例」", () => {
     assert.equal(
         buildRunTitle("tests\\Common\\Button\\test_close_button.json", 1),
         "tests/Common/Button/test_close_button.json 第 2 个用例",
+    );
+});
+
+test("批量跑时每个文件各来一个 --file，顺序照传进来的来", () => {
+    const files = [
+        "/repo/tests/a.json",
+        "/repo/tests/b.json",
+        "/repo/tests/c.json",
+    ];
+    const args = buildRunnerArgs({...BASE, testFiles: files});
+
+    const fileArgs = [];
+    for (let i = 0; i < args.length; i += 1) if (args[i] === "--file") fileArgs.push(args[i + 1]);
+    assert.deepEqual(fileArgs, files);
+    assert.equal(args.includes("--case"), false);
+});
+
+test("testFiles 只有一个时等价于单个 testFile；空数组则回落到 testFile", () => {
+    const single = buildRunnerArgs({...BASE, testFiles: [BASE.testFile]});
+    assert.deepEqual(single, buildRunnerArgs(BASE));
+
+    const fallback = buildRunnerArgs({...BASE, testFiles: []});
+    assert.deepEqual(fallback, buildRunnerArgs(BASE));
+});
+
+test("批量标题：一个文件用单文件标题，多个写数量和第一个文件", () => {
+    assert.equal(buildBatchRunTitle([]), "0 个测试文件");
+    assert.equal(buildBatchRunTitle(["tests/a.json"]), "tests/a.json");
+    assert.equal(
+        buildBatchRunTitle([
+            "tests/a.json",
+            "tests/b.json",
+        ]),
+        "2 个测试文件（批量，含 tests/a.json 等）",
     );
 });

@@ -18,7 +18,7 @@ test("解析全部参数", () => {
     assert.deepEqual(args, {
         workspace: "/repo",
         config: "custom.config.mts",
-        file: "tests/Common/Button/test_close_button.json",
+        files: ["tests/Common/Button/test_close_button.json"],
         caseIndex: 2,
         dryRun: true,
     });
@@ -47,7 +47,7 @@ test("参数顺序不影响解析", () => {
         "/repo",
     ]);
     assert.equal(args.workspace, "/repo");
-    assert.equal(args.file, "x.json");
+    assert.deepEqual(args.files, ["x.json"]);
     assert.equal(args.caseIndex, 0);
     assert.equal(args.dryRun, true);
 });
@@ -160,5 +160,38 @@ test("位置参数报 UsageError", () => {
                 "x.json",
             ]),
         (error) => error instanceof UsageError && error.message.includes("x.json"),
+    );
+});
+
+test("--file 可以重复给，按顺序进 files 数组", () => {
+    const parsed = parseArgs([
+        "--workspace",
+        "/repo",
+        "--file",
+        "a.json",
+        "--file",
+        "b.json",
+    ]);
+    assert.deepEqual(parsed.files, [
+        "a.json",
+        "b.json",
+    ]);
+    assert.equal(parsed.caseIndex, null);
+});
+
+test("多个 --file 时不允许再带 --case（下标含义会歧义）", () => {
+    assert.throws(
+        () =>
+            parseArgs([
+                "--workspace",
+                "/repo",
+                "--file",
+                "a.json",
+                "--file",
+                "b.json",
+                "--case",
+                "1",
+            ]),
+        /不能再用 --case/,
     );
 });

@@ -29,7 +29,8 @@
 | `lib/args.mjs` | 手写参数解析 + 用法文本；`--case` 只收非负整数 |
 | `lib/test-file.mjs` | 读目标文件（jsonc）、结构规整、`buildTarget`（`--case` 越界抛专用错误） |
 | `lib/case-key.mjs` | 用例键 = `<图片名>\|<命中节点按字典序去重后逗号连接>`；`hits` 支持字符串与 `{node, box}` |
-| `lib/filter.mjs` | `filterGroups()` 纯函数（不就地改入参）+ 组名/组简称 |
+| `lib/filter.mjs` | `filterGroupsForFiles()` 批量过滤（不就地改入参）：留下目标文件的组和用例，并给出「组名 → 哪些文件」的归属；`filterGroups()` 是单文件版本 |
+| `lib/results.mjs` | 从 maa-tools 的输出里逐组判定通过/失败，再按归属汇总成逐文件结论；`RESULT-FILE:` 行格式也在这里 |
 | `lib/images.mjs` | 截图路径（与 `runTest` 内算法逐字一致）、存在性扫描、统计 |
 | `lib/png.mjs` | 读 PNG 头拿宽高 |
 | `lib/paths.mjs` | 相对仓库根解析路径、日志里显示相对路径 |
@@ -65,14 +66,17 @@
 node runner/run-single-test.mjs \
   --workspace <仓库根绝对路径> \
   [--config <相对仓库根的 maatools 配置，默认 maatools.config.mts>] \
-  --file <测试 json：绝对路径或相对仓库根> \
+  --file <测试 json> [--file <测试 json> ...] \
   [--case <用例下标，从 0 开始>] \
   [--dry-run]
 ```
 
-- 不传 `--case`：跑该文件全部用例。
+- `--file` 可以重复：多个文件就是**批量跑**，一次进程跑完，省掉每个文件重新准备 MaaFW 的固定开销。
+- 不传 `--case`：跑目标文件里的全部用例；批量跑时不允许带 `--case`（下标含义会歧义）。
 - `--dry-run`：只解析、过滤、检查截图，打印计划；不加载 MaaFW、不执行识别。
-- stdout 是人话日志，**最后一行固定** `RESULT: pass|fail|error|empty`；退出码与之一致。
+- stdout 是人话日志，随后是**逐文件结论** `RESULT-FILE: <相对路径> pass|fail|error`，**最后一行固定** `RESULT: pass|fail|error|empty`；退出码与最后一行一致。
+- 逐文件结论怎么来的：`runTest` 只返回整批一个布尔值，所以跑的时候把 stdout 抄一份，按「组名行 = 该组开始、行首两空格 = 该组有失败明细」判定每组，再按 `owners`（组名 → 文件）分发到文件。相关纯函数都在 `lib/results.mjs`，有单测。
+- 文件级结论还会被两条规则覆盖成 `error`：该文件一张截图都不存在、或它在过滤后一个组都没匹配到 —— 这两种情况下「通过」是假的。
 - 脚本自己不做「静默降级」：缺少 `--workspace`/`--file`、配置文件加载失败、目标文件不存在、截图一张都不存在、MaaFW 起不来，全部按前置错误报出来。
 
 ## 退出码 → 扩展行为
@@ -131,7 +135,7 @@ path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.im
 
 - **发现**：`findFiles` 扫 `test_*.json` 与 `test_*.jsonc`，按 `isTestFilePath()` 过滤；按相对路径排序后用 `folderSegments()` 建「目录 → 文件 → 用例」三层树（`tests` 这层省略，目录灰字是「含 N 个测试文件」）。JSON 坏掉的跳过并 `console.warn`，不影响整个面板。保存文件后 300ms 防抖刷新。
 - **节点的身份**：每个叶子节点（文件、用例）登记在 `leaves: Map<id, {filePath, relativePath, caseIndex?}>` 里，运行时只认这张表，不靠解析 id 字符串 —— 目录节点因此不需要挂 uri，也不会被误当成可运行的东西。
-- **运行**：`collectTargets()` 递归遍历选中的节点 —— 没有 `include`（Run All）时取全部叶子；目录节点展开成它下面每个文件各一次；文件节点一次；用例节点只跑那一条。同一文件既有整文件又有单用例时，整文件优先去重。
+- **运行**：`collectTargets()` 递归遍历选中的节点 —— 没有 `include`（Run All）时取全部叶子；目录节点展开成它下面所有文件；文件节点就是它自己；用例节点只跑那一条。同一文件既有整文件又有单用例时，整文件优先去重。结果分成两类：**文件级目标合成一次进程**（解析 `RESULT-FILE` 行逐文件标记），**用例级目标各自一次进程**（退出码即结论）。
 - **串行**：多个目标用一个 promise 队列逐个跑，避免同时起一堆 MaaFW。
 - **取消**：`CancellationToken` → `process.cancel()`，被取消的标 skipped。
 - **整文件运行**：进程只给一个总结果，所以文件和它的子用例统一标记；失败信息提示「展开后单跑以定位」。

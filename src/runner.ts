@@ -3,7 +3,7 @@ import type {ChildProcess} from "node:child_process";
 import {existsSync} from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import {buildRunTitle, buildRunnerArgs, formatCommandLine} from "./core/runnerArgs";
+import {buildBatchRunTitle, buildRunTitle, buildRunnerArgs, formatCommandLine} from "./core/runnerArgs";
 
 /**
  * 这一层只管「把 runner 脚本拉起来 + 收输出 + 拿退出码」。
@@ -37,10 +37,14 @@ export interface RunRequest {
     nodePath: string;
     /** maatools 配置，相对仓库根 */
     configPath: string;
-    /** 测试文件绝对路径 */
+    /** 测试文件绝对路径（单文件跑时用它；批量跑时是第一个文件） */
     testFile: string;
     /** 相对仓库根的路径，只用来拼标题 */
     testFileRelativePath: string;
+    /** 批量跑的绝对路径列表。非空时一次进程跑完这些文件，省掉每个文件重新准备 MaaFW */
+    testFiles?: readonly string[];
+    /** 批量跑对应的相对路径，只用来拼标题 */
+    testFileRelativePaths?: readonly string[];
     /** 用例下标，不传就跑整个文件 */
     caseIndex?: number;
     /** 只看计划，不实际执行 */
@@ -69,6 +73,14 @@ export interface TestProcess {
 /** 本次运行等价于哪条命令行，出问题时方便用户自己复制去终端跑 */
 export function describeCommand(request: RunRequest, extensionPath: string): string {
     return formatCommandLine(request.nodePath, buildRunnerArgsIn(request, extensionPath));
+}
+
+/** 这次运行的显示标题：单文件 / 单用例 / 批量三种写法 */
+export function describeRunTitle(request: RunRequest): string {
+    if (request.testFiles && request.testFiles.length > 1) {
+        return buildBatchRunTitle(request.testFileRelativePaths ?? []);
+    }
+    return buildRunTitle(request.testFileRelativePath, request.caseIndex);
 }
 
 /** 启动一次 runner。调用方负责自己处理输出与结果 */
@@ -129,6 +141,7 @@ function buildRunnerArgsIn(request: RunRequest, extensionPath: string): string[]
         workspaceRoot: request.workspaceRoot,
         configPath: request.configPath,
         testFile: request.testFile,
+        testFiles: request.testFiles,
         caseIndex: request.caseIndex,
         dryRun: request.dryRun,
     });
