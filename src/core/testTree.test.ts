@@ -69,24 +69,19 @@ test("用例标题：优先 name，其次图片名去扩展名，最后退化成
     assert.equal(describeCaseLabel(CASES[2]), "第 3 个用例");
 });
 
-test("用例灰字：有 name 时带图片名，没有就只写命中情况，不再重复标题", () => {
-    assert.equal(describeCaseDescription(CASES[0]), "帝江号_大世界.png · 命中 1 个节点");
-    assert.equal(describeCaseDescription(CASES[1]), "命中 2 个节点");
-    assert.equal(describeCaseDescription(CASES[2]), "没写 image · 负例（不该命中）");
+test("用例灰字：普通用例留空，负例与缺少截图名才提示", () => {
+    assert.equal(describeCaseDescription(CASES[0]), "");
+    assert.equal(describeCaseDescription(CASES[1]), "");
+    assert.equal(describeCaseDescription({...CASES[0], hits: []}), "负例");
+    assert.equal(describeCaseDescription(CASES[2]), "缺少截图名");
+    assert.equal(describeCaseLabel({...CASES[0], name: "  "}), "帝江号_大世界");
 });
 
-test("文件灰字：组名 + 平台/资源矩阵", () => {
-    assert.equal(describeFileDescription(FILE), "通用按钮 · Win32/ADB × 官服");
-
-    const unnamed: CollectedFile = {
-        file: "tests/a/test_x.json",
-        name: null,
-        controllers: [],
-        resources: ["官服"],
-        cases: [],
-    };
-    assert.match(describeFileDescription(unnamed), /未命名测试组（tests\/a\/test_x\.json）/);
-    assert.match(describeFileDescription(unnamed), /未写 controller/);
+test("文件灰字：只保留组名，未命名时留空", () => {
+    assert.equal(describeFileDescription(FILE), "通用按钮");
+    assert.equal(describeFileDescription({...FILE, name: "  通用按钮  "}), "通用按钮");
+    assert.equal(describeFileDescription({...FILE, name: null}), "");
+    assert.equal(describeFileDescription({...FILE, name: "  "}), "");
 });
 
 test("节点 id 由绝对路径拼出来，同一文件刷新后不变", () => {
@@ -120,12 +115,12 @@ test("建出来的文件节点：区间原样来自收集结果，能切出用�
     }
 });
 
-test("读取失败的文件：节点说明里带原因，没有用例子节点", () => {
+test("读取失败的文件：灰字简短，错误详情保留，没有用例子节点", () => {
     const node = buildFileNode(
         {file: "tests/a/test_bad.json", name: null, controllers: [], resources: [], cases: [], error: "JSON 解析失败"},
         "/repo/tests/a/test_bad.json",
     );
-    assert.match(node.description, /读取失败：JSON 解析失败/);
+    assert.equal(node.description, "读取失败");
     assert.equal(node.error, "JSON 解析失败");
     assert.equal(node.cases.length, 0);
 });

@@ -282,9 +282,12 @@ export class NodeTestExplorer implements vscode.Disposable {
                 ? new vscode.Range(entry.document.positionAt(start), entry.document.positionAt(end))
                 : new vscode.Range(0, 0, 0, 0);
         const fileItem = this.controller.createTestItem(fileNode.id, fileNode.label, entry.uri);
-        fileItem.description = missingImages?.length
-            ? `${fileNode.description} · ${missingImages.length} 条用例缺图`
-            : fileNode.description;
+        fileItem.description = [
+            fileNode.description,
+            missingImages?.length ? `${missingImages.length} 条用例缺图` : "",
+        ]
+            .filter(Boolean)
+            .join(" · ");
         fileItem.range = toRange(fileNode.start, fileNode.end);
         fileItem.canResolveChildren = false;
         fileItem.error = fileNode.error;
@@ -298,9 +301,12 @@ export class NodeTestExplorer implements vscode.Disposable {
             const caseItem = this.controller.createTestItem(caseNode.id, caseNode.label, entry.uri);
             // 探测阶段就把缺图写进节点，跑之前一眼能看到
             const warning = missingImages?.find((item) => item.caseIndex === caseNode.caseIndex);
-            caseItem.description = warning
-                ? `${caseNode.description} · ${summarizeMissingImage(warning)}`
-                : caseNode.description;
+            caseItem.description = [
+                caseNode.description,
+                warning ? summarizeMissingImage(warning) : "",
+            ]
+                .filter(Boolean)
+                .join(" · ");
             caseItem.range = toRange(caseNode.start, caseNode.end);
             fileItem.children.add(caseItem);
             this.leaves.set(caseItem.id, {

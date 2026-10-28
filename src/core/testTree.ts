@@ -74,38 +74,21 @@ export function caseNodeId(filePath: string, caseIndex: number): string {
  * 都没有（缺 image）就退化成「第 N 个用例」。
  */
 export function describeCaseLabel(entry: CollectedCase): string {
-    if (entry.name) return entry.name;
+    const name = entry.name?.trim();
+    if (name) return name;
     if (entry.image) return stripExtension(entry.image);
     return `第 ${entry.index + 1} 个用例`;
 }
 
-/**
- * 用例右侧的灰字：图片名 + 预期命中节点数。
- * 标题已经是图片名（没写 name）时不再重复一遍 —— 同一行写两遍同样的字，只是把行撑长。
- */
+/** 用例灰字只提示负例或缺少截图名，普通用例由标题、状态和耗时说明。 */
 export function describeCaseDescription(entry: CollectedCase): string {
-    const parts: string[] = [];
-    if (!entry.image) parts.push("没写 image");
-    else if (entry.name) parts.push(entry.image);
-    parts.push(entry.hits.length === 0 ? "负例（不该命中）" : `命中 ${entry.hits.length} 个节点`);
-    return parts.join(" · ");
+    if (!entry.image) return "缺少截图名";
+    return entry.hits.length === 0 ? "负例" : "";
 }
 
-/**
- * 文件右侧的灰字：测试组名 + 平台/资源矩阵。
- * 这几项正好是「跑这个文件会展开成哪几组」的关键，省得用户回去翻 configs；
- * 用例数不写：展开就能看见，而且和目录行一样属于数数，凑长了只会被截断。
- */
+/** 文件灰字只保留组名，控制器与资源可在源文件和测试输出中查看。 */
 export function describeFileDescription(entry: CollectedFile): string {
-    const parts: string[] = [];
-    parts.push(entry.name ?? `未命名测试组（${entry.file}）`);
-    const {controllers, resources} = entry;
-    if (controllers.length > 0 || resources.length > 0) {
-        parts.push(
-            `${controllers.length > 0 ? controllers.join("/") : "未写 controller"} × ${resources.length > 0 ? resources.join("/") : "未写 resource"}`,
-        );
-    }
-    return parts.join(" · ");
+    return entry.name?.trim() ?? "";
 }
 
 /**
@@ -125,7 +108,7 @@ export function buildFileNode(entry: CollectedFile, filePath: string): FileNodeD
     return {
         id: fileNodeId(filePath),
         label: fileNameOf(entry.file),
-        description: entry.error ? `读取失败：${entry.error}` : describeFileDescription(entry),
+        description: entry.error ? "读取失败" : describeFileDescription(entry),
         error: entry.error,
         // 文件级节点指向文件开头
         start: 0,

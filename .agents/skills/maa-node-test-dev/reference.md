@@ -55,6 +55,8 @@
 4. **编辑辅助**：provider 将当前文本、光标位置和设置交给对应的 core 模块；[repoIndex.ts](../../../src/core/repoIndex.ts) 读取并缓存仓库资料，[screenshots.ts](../../../src/core/screenshots.ts) 查图，[png.ts](../../../src/core/png.ts) 读取尺寸。core 返回普通数据或文字，provider 创建 VS Code 对象；这些结果不决定实际收集范围或测试结论。
 5. **工具版本**：[toolVersionStatus.ts](../../../src/toolVersionStatus.ts) 根据配置和依赖变化调用安装模块查询版本，由 [toolStatus.ts](../../../src/core/toolStatus.ts) 生成文字，再更新状态栏与兼容提示；二者共用查询结果。
 
+测试树的文件灰字只保留组名，未命名时留空；用例标题优先取非空 `name`，否则用截图名或原始序号。普通用例不加描述，负例、缺少截图名、缺图和读取失败保留短提示。控制器、资源及预期节点详情在源文件和运行输出中查看，不在每行重复。
+
 ## 为什么使用仓库里的 maa-tools
 
 扩展不自带 `@nekosu/maa-tools` 副本，只调用：
