@@ -10,7 +10,7 @@ import {
     isMaaToolsVersionSupported,
     queryMaaToolsVersion,
     workspaceMaaToolsCli,
-} from "./maatools/cli";
+} from "./maatools/installation";
 
 export const REFRESH_TOOL_VERSION_COMMAND = "maaNodeTest.refreshToolVersion";
 const REFRESH_DELAY_MS = 250;

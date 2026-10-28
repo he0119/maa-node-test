@@ -3,9 +3,9 @@ import {findNodeAtOffset, getNodePath, parseTree} from "jsonc-parser";
 import {resolveNodeTestWorkspace} from "../config";
 import {findImageFieldAt, parseTestDocument} from "../core/document";
 import {resolveControllerDir} from "../core/loaderMaps";
-import {isHitsEntryPath} from "../core/pipeline";
+import {isHitsEntryPath} from "../core/hits";
 import type {RepoIndex} from "../core/repoIndex";
-import {locateImage, orderImageLocations} from "../core/testset";
+import {locateImage, orderImageLocations} from "../core/screenshots";
 
 /**
  * 测试文件里有两处可以 Ctrl+Click / F12 跳转，**有多处结果时返回列表**（VS Code 会弹 peek 让人挑）：

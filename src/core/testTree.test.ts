@@ -13,7 +13,7 @@ import {
     fileNameOf,
     folderSegments,
     toPosix,
-} from "./testExplorer";
+} from "./testTree";
 
 /** 原文样例：夹具里的字符偏移按它算，断言时能切出用例原文 */
 const SAMPLE = `{

@@ -1,6 +1,6 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
-import {describeNodeBehavior, describePipelineNode, isHitsEntryPath, parsePipelineNodes} from "./pipeline";
+import {describeNodeBehavior, describePipelineNode, parsePipelineNodes} from "./pipeline";
 
 const PIPELINE_TEXT = `{
     "ZiplineImportMain": {
@@ -104,51 +104,4 @@ test("节点行为：Reco 和 Act 拼成一行，缺哪个就不写哪个", () =
     assert.equal(describeNodeBehavior({...base, recognition: "OCR", action: "Click"}), "Reco: OCR · Act: Click");
     assert.equal(describeNodeBehavior({...base, action: "Click"}), "Act: Click");
     assert.equal(describeNodeBehavior(base), undefined);
-});
-
-test("hits 路径判断：只认 cases[n].hits[m] 和它的 .node", () => {
-    assert.equal(
-        isHitsEntryPath([
-            "cases",
-            0,
-            "hits",
-            1,
-        ]),
-        true,
-    );
-    assert.equal(
-        isHitsEntryPath([
-            "cases",
-            0,
-            "hits",
-            1,
-            "node",
-        ]),
-        true,
-    );
-    assert.equal(
-        isHitsEntryPath([
-            "cases",
-            0,
-            "hits",
-            1,
-            "box",
-        ]),
-        false,
-    );
-    assert.equal(
-        isHitsEntryPath([
-            "cases",
-            0,
-            "image",
-        ]),
-        false,
-    );
-    assert.equal(
-        isHitsEntryPath([
-            "configs",
-            "name",
-        ]),
-        false,
-    );
 });

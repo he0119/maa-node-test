@@ -1,6 +1,6 @@
 // 由 maa-tools buildTestRunResult 的实际输出生成，覆盖合法未执行占位、部分缺图、全缺图和无匹配。
 import type {ResultDocument} from "./protocol";
-export const reportFixtures: Record<"partialError" | "partialMissing" | "allMissing" | "empty", ResultDocument> = {
+export const upstreamReports: Record<"partialError" | "partialMissing" | "allMissing" | "empty", ResultDocument> = {
     partialError: {
         schemaVersion: 1,
         groups: [

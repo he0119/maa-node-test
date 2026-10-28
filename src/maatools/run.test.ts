@@ -4,10 +4,11 @@ import {tmpdir} from "node:os";
 import * as path from "node:path";
 import {test, type TestContext} from "node:test";
 
-import {runChild, startRunFlow} from "./flow";
-import {fixtureResult} from "./fixtures.test-helper";
-import {runTestList} from "./list";
-import {reportFixtures} from "./report-fixtures.test-helper";
+import {startMaaToolsRun} from "./run";
+import {runChild} from "./process";
+import {fixtureResult} from "./result-builders.test-helper";
+import {collectTests} from "./collect";
+import {upstreamReports} from "./upstream-reports.test-helper";
 import type {TestRunEvent} from "./protocol";
 
 function fakeWorkspace(
@@ -66,7 +67,7 @@ function inWorkspace<T>(fixture: T, workspace: string): T {
 test("单次JSON运行不读取配置或本地测试文件；传同一份文件选择与配置", async (t) => {
     const {root, argsFile} = fakeWorkspace(t, (workspace: string) => fixtureResult(workspace, [1]));
     let log = "";
-    const outcome = await startRunFlow(
+    const outcome = await startMaaToolsRun(
         {
             workspaceRoot: root,
             nodePath: process.execPath,
@@ -93,7 +94,7 @@ test("单次JSON运行不读取配置或本地测试文件；传同一份文件�
 
 test("顶层失败与文件通过矛盾时清空所有可通过Map", async (t) => {
     const {root} = fakeWorkspace(t, (workspace: string) => ({...fixtureResult(workspace), status: "failed"}));
-    const outcome = await startRunFlow({
+    const outcome = await startMaaToolsRun({
         workspaceRoot: root,
         nodePath: process.execPath,
         testFiles: ["tests/test_a.json"],
@@ -113,7 +114,7 @@ test("遗漏所选用例或未知schema不返回部分通过", async (t) => {
             const doc = fixtureResult(workspace);
             return mode === "version" ? {...doc, schemaVersion: 2} : doc;
         });
-        const outcome = await startRunFlow({
+        const outcome = await startMaaToolsRun({
             workspaceRoot: root,
             nodePath: process.execPath,
             testFiles: ["tests/test_a.json"],
@@ -143,7 +144,7 @@ test("按错误代码区别配置启动失败与无匹配，不猜英文reason",
         files: [],
         durationMs: 0,
     });
-    const failed = await startRunFlow({
+    const failed = await startMaaToolsRun({
         workspaceRoot: root,
         nodePath: process.execPath,
         testFiles: ["tests/test_a.json"],
@@ -151,8 +152,8 @@ test("按错误代码区别配置启动失败与无匹配，不猜英文reason",
     assert.match(failed.error!, /配置加载失败/);
     assert.equal(failed.empty, undefined);
     assert.doesNotMatch(failed.error!, /MaaFW/);
-    const empty = fakeWorkspace(t, (workspace: string) => inWorkspace(reportFixtures.empty, workspace));
-    const outcome = await startRunFlow({
+    const empty = fakeWorkspace(t, (workspace: string) => inWorkspace(upstreamReports.empty, workspace));
+    const outcome = await startMaaToolsRun({
         workspaceRoot: empty.root,
         nodePath: process.execPath,
         testFiles: ["tests/test_a.json"],
@@ -162,8 +163,8 @@ test("按错误代码区别配置启动失败与无匹配，不猜英文reason",
 });
 
 test("实际report的全局error保留正常文件和未执行平台的逐用例结果", async (t) => {
-    const {root} = fakeWorkspace(t, (workspace: string) => inWorkspace(reportFixtures.partialError, workspace));
-    const outcome = await startRunFlow({
+    const {root} = fakeWorkspace(t, (workspace: string) => inWorkspace(upstreamReports.partialError, workspace));
+    const outcome = await startMaaToolsRun({
         workspaceRoot: root,
         nodePath: process.execPath,
         testFiles: [
@@ -179,9 +180,9 @@ test("实际report的全局error保留正常文件和未执行平台的逐用例
 });
 
 test("部分平台缺图不能输出全部平台都未验证的说明", async (t) => {
-    const {root} = fakeWorkspace(t, (workspace: string) => inWorkspace(reportFixtures.partialMissing, workspace));
+    const {root} = fakeWorkspace(t, (workspace: string) => inWorkspace(upstreamReports.partialMissing, workspace));
     let log = "";
-    const outcome = await startRunFlow(
+    const outcome = await startMaaToolsRun(
         {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
         {onOutput: (chunk) => (log += chunk)},
     ).done;
@@ -193,12 +194,12 @@ test("部分平台缺图不能输出全部平台都未验证的说明", async (t
 
 test("取消丢弃半截结果；进程无法启动有明确错误代码", async (t) => {
     const {root} = fakeWorkspace(t, null, {hang: true});
-    const flow = startRunFlow({workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]});
+    const flow = startMaaToolsRun({workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]});
     flow.cancel();
     const cancelled = await flow.done;
     assert.equal(cancelled.cancelled, true);
     assert.equal(cancelled.error, undefined);
-    const failed = await startRunFlow({
+    const failed = await startMaaToolsRun({
         workspaceRoot: root,
         nodePath: path.join(root, "missing-node"),
         testFiles: ["tests/test_a.json"],
@@ -211,7 +212,7 @@ test("实际发现传--list --json、文件过滤与自定义配置，并转换�
         schemaVersion: 1,
         files: fixtureResult(workspace).files,
     }));
-    const listed = await runTestList({
+    const listed = await collectTests({
         workspaceRoot: root,
         nodePath: process.execPath,
         configPath: "custom.mts",
@@ -235,7 +236,7 @@ test("实际发现传--list --json、文件过滤与自定义配置，并转换�
         errorCode: "collection-source-missing",
         reason: "loader discarded origin",
     });
-    const rejected = await runTestList({workspaceRoot: error.root, nodePath: process.execPath});
+    const rejected = await collectTests({workspaceRoot: error.root, nodePath: process.execPath});
     assert.equal(rejected.doc, null);
     assert.match(rejected.stderr, /collection-source-missing/);
 });
@@ -244,7 +245,7 @@ test("发现收到可读列表时明确失败，不把终端文案当成结构�
     const {root} = fakeWorkspace(t, null);
     const cli = path.join(root, "node_modules/@nekosu/maa-tools/bin/maa-tools");
     writeFileSync(cli, 'process.stdout.write("测试文件：tests/test_a.json\\n  用例 1\\n");');
-    const listed = await runTestList({workspaceRoot: root, nodePath: process.execPath});
+    const listed = await collectTests({workspaceRoot: root, nodePath: process.execPath});
     assert.equal(listed.doc, null);
     assert.match(listed.stderr, /收集结果不符合约定/);
     assert.match(listed.stderr, /测试文件：tests\/test_a.json/);
@@ -252,7 +253,7 @@ test("发现收到可读列表时明确失败，不把终端文案当成结构�
 
 test("进程非零退出不得接受passed结果", async (t) => {
     const {root} = fakeWorkspace(t, (workspace: string) => fixtureResult(workspace), {exitCode: 1});
-    const outcome = await startRunFlow({
+    const outcome = await startMaaToolsRun({
         workspaceRoot: root,
         nodePath: process.execPath,
         testFiles: ["tests/test_a.json"],
@@ -283,7 +284,7 @@ test("无UI回调也消费JSONL进度，子进程只有标准管道", async (t) 
     const {root} = fakeWorkspace(t, (workspace: string) => fixtureResult(workspace), {
         events: (workspace) => [liveCase(workspace, 1)],
     });
-    const outcome = await startRunFlow({
+    const outcome = await startMaaToolsRun({
         workspaceRoot: root,
         nodePath: process.execPath,
         testFiles: ["tests/test_a.json"],
@@ -301,7 +302,7 @@ test("即时结果在最终JSON产生前交付，缺少的事件由最终结果�
         waitForRelease: true,
     });
     const received: TestRunEvent[] = [];
-    const outcome = await startRunFlow(
+    const outcome = await startMaaToolsRun(
         {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
         {
             onProgress: (event) => {
@@ -321,8 +322,8 @@ test("即时结果在最终JSON产生前交付，缺少的事件由最终结果�
 
 test("用户取消保留已完成case，尚无file-result时文件不算完成", async (t) => {
     const {root} = fakeWorkspace(t, null, {events: (workspace) => [liveCase(workspace, 1)], hang: true});
-    let flow: ReturnType<typeof startRunFlow>;
-    flow = startRunFlow(
+    let flow: ReturnType<typeof startMaaToolsRun>;
+    flow = startMaaToolsRun(
         {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
         {onProgress: () => flow.cancel()},
     );
@@ -335,8 +336,8 @@ test("用户取消保留已完成case，尚无file-result时文件不算完成",
 
 test("取消保留file-result已经完成的文件与全部用例", async (t) => {
     const {root} = fakeWorkspace(t, null, {events: (workspace) => [liveFile(workspace)], hang: true});
-    let flow: ReturnType<typeof startRunFlow>;
-    flow = startRunFlow(
+    let flow: ReturnType<typeof startMaaToolsRun>;
+    flow = startMaaToolsRun(
         {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
         {onProgress: () => flow.cancel()},
     );
@@ -355,7 +356,7 @@ test("非法完整记录终止进程并清除此前已发布的通过，不抛�
         hang: true,
     });
     let published = 0;
-    const outcome = await startRunFlow(
+    const outcome = await startMaaToolsRun(
         {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
         {onProgress: () => published++},
     ).done;
@@ -367,8 +368,8 @@ test("非法完整记录终止进程并清除此前已发布的通过，不抛�
 
 test("实时消息处理出错优先于同时发生的用户取消", async (t) => {
     const {root} = fakeWorkspace(t, null, {events: (workspace) => [liveCase(workspace, 1)], hang: true});
-    let flow: ReturnType<typeof startRunFlow>;
-    flow = startRunFlow(
+    let flow: ReturnType<typeof startMaaToolsRun>;
+    flow = startMaaToolsRun(
         {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
         {
             onProgress: () => {
@@ -385,7 +386,7 @@ test("实时消息处理出错优先于同时发生的用户取消", async (t) =
 
 test("合法进程异常保留已验证完成事实，仍报告运行错误", async (t) => {
     const {root} = fakeWorkspace(t, null, {events: (workspace) => [liveCase(workspace, 1)], terminate: true});
-    const outcome = await startRunFlow(
+    const outcome = await startMaaToolsRun(
         {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
         {onProgress: () => {}},
     ).done;
@@ -404,7 +405,7 @@ test("最终报告与完成事件矛盾时报告协议错误而不保留通过",
         },
         {events: (workspace) => [liveCase(workspace, 1)]},
     );
-    const outcome = await startRunFlow(
+    const outcome = await startMaaToolsRun(
         {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
         {onProgress: () => {}},
     ).done;
@@ -422,7 +423,7 @@ test("相同重复事件只交付一次，缺失事件不阻止接受完整最�
         ],
     });
     const types: string[] = [];
-    const outcome = await startRunFlow(
+    const outcome = await startMaaToolsRun(
         {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
         {onProgress: (event) => types.push(event.type)},
     ).done;
@@ -452,7 +453,7 @@ test("JSONL处理中文UTF8拆字节、CRLF及一块多行", async (t) => {
             ],
         });
         const types: string[] = [];
-        const outcome = await startRunFlow(
+        const outcome = await startMaaToolsRun(
             {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
             {onProgress: (event) => types.push(event.type)},
         ).done;
@@ -469,7 +470,7 @@ test("JSONL处理中文UTF8拆字节、CRLF及一块多行", async (t) => {
 test("JSONL单行超过64KB且跨多个块仍读取完整报告", async (t) => {
     const reason = "完整中文报告".repeat(20000);
     const {root} = fakeWorkspace(t, (workspace: string) => ({...fixtureResult(workspace), reason}), {chunkSize: 8192});
-    const outcome = await startRunFlow({
+    const outcome = await startMaaToolsRun({
         workspaceRoot: root,
         nodePath: process.execPath,
         testFiles: ["tests/test_a.json"],
@@ -507,7 +508,7 @@ test("未知header、完整坏行、重复终条或终条后记录均清除已�
             },
         });
         let published = 0;
-        const outcome = await startRunFlow(
+        const outcome = await startMaaToolsRun(
             {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
             {onProgress: () => published++},
         ).done;
@@ -536,7 +537,7 @@ test("正常退出缺少run-result、终条无换行或尾部截断均报错", a
                         ? '{"schemaVersion":1,'
                         : finalLine(workspace) + "{"),
         });
-        const outcome = await startRunFlow({
+        const outcome = await startMaaToolsRun({
             workspaceRoot: root,
             nodePath: process.execPath,
             testFiles: ["tests/test_a.json"],
@@ -556,7 +557,7 @@ test("无UI回调也拒绝进度与最终报告矛盾", async (t) => {
         },
         {events: (workspace) => [liveCase(workspace, 1)]},
     );
-    const outcome = await startRunFlow({
+    const outcome = await startMaaToolsRun({
         workspaceRoot: root,
         nodePath: process.execPath,
         testFiles: ["tests/test_a.json"],
@@ -577,8 +578,8 @@ test("用户取消留下的半行不抹掉完成事实，完整坏行仍优先�
                 "\n" +
                 (completeBadLine ? "{broken}\n" : '{"schemaVersion":1,'),
         });
-        let flow: ReturnType<typeof startRunFlow>;
-        flow = startRunFlow(
+        let flow: ReturnType<typeof startMaaToolsRun>;
+        flow = startMaaToolsRun(
             {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
             {onProgress: () => flow.cancel()},
         );
@@ -594,7 +595,7 @@ test("信号终止且末尾半行时保留已完成事实", async (t) => {
         terminate: true,
         rawStream: (workspace) => JSON.stringify(liveCase(workspace, 1)) + '\n{"schemaVersion":1,',
     });
-    const outcome = await startRunFlow({
+    const outcome = await startMaaToolsRun({
         workspaceRoot: root,
         nodePath: process.execPath,
         testFiles: ["tests/test_a.json"],
@@ -647,8 +648,8 @@ test("取消保留已经收到file-result的空选择跳过，不误报协议错
             return [{schemaVersion: 1, type: "file-result", file: result.files[0].file, result}];
         },
     });
-    let flow: ReturnType<typeof startRunFlow>;
-    flow = startRunFlow(
+    let flow: ReturnType<typeof startMaaToolsRun>;
+    flow = startMaaToolsRun(
         {
             workspaceRoot: root,
             nodePath: process.execPath,

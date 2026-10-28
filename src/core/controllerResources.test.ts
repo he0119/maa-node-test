@@ -1,6 +1,6 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
-import {normalizeResourceName, parseControllerResources, resourcesForControllers} from "./resources";
+import {normalizeResourceName, parseControllerResources, resourcesForControllers} from "./controllerResources";
 
 /** 照 MaaEnd 的 interface.json 抄的片段：不同控制器挂不同资源目录 */
 const INTERFACE_TEXT = `{

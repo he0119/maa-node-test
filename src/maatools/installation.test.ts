@@ -14,7 +14,7 @@ import {
     queryMaaToolsVersion,
     readMaaToolsVersion,
     workspaceMaaToolsCli,
-} from "./cli";
+} from "./installation";
 
 const WORKSPACE = path.join(path.sep, "repo");
 

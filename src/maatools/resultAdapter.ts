@@ -1,7 +1,7 @@
 // 把 maa-tools 已汇总的文件、用例结论转为显示数据；不在扩展中重判测试。
 
-import {caseKeyOf, type CaseOutcome, type CaseVerdict, type FileVerdict} from "../core/testResult";
-import {displayPath, pathKey} from "./paths";
+import {caseKeyOf, type CaseOutcome, type CaseVerdict, type FileVerdict} from "../core/testMarks";
+import {displayPath, pathKey} from "../core/paths";
 import type {CaseCheck, ResultDocument, RunFileResult} from "./protocol";
 
 export type {CaseCheck, CaseOrigin, RunCaseResult, RunFileCaseResult, RunFileResult, RunGroupResult} from "./protocol";

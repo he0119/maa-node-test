@@ -2,8 +2,13 @@
 
 import {isDeepStrictEqual} from "node:util";
 
-import type {CaseOutcome, FileVerdict} from "../core/testResult";
-import {isAbsolutePath, pathKey, resolveFromWorkspace, samePath} from "./paths";
+import {isAbsolutePath, pathKey, resolveFromWorkspace, samePath} from "../core/paths";
+
+/** 文件跳过仅表示本次筛选未选择用例。 */
+export type FileVerdict = "pass" | "fail" | "error" | "skipped";
+
+/** 单条用例还可以被跳过，表示至少有平台没有完成验证，不能标成用例通过。 */
+export type CaseOutcome = FileVerdict | "skipped";
 
 export interface ListCase {
     index: number;
@@ -15,7 +20,7 @@ export interface ListCase {
 }
 
 export interface ListFileEntry {
-    /** 上游返回绝对路径；runTestList 转为相对工作区的显示路径。 */
+    /** 上游返回绝对路径；collectTests 转为相对工作区的显示路径。 */
     file: string;
     name?: string | null;
     controllers: string[];

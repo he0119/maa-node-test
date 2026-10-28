@@ -1,13 +1,6 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
-import {
-    DEFAULT_CONFIG,
-    buildBatchRunTitle,
-    buildMaaToolsArgs,
-    buildRunTitle,
-    formatCommandLine,
-    quoteArgument,
-} from "./runnerArgs";
+import {DEFAULT_CONFIG, buildMaaToolsArgs, formatCommandLine, quoteArgument} from "./command";
 
 const BASE = {
     cliPath: "/repo/node_modules/@nekosu/maa-tools/bin/maa-tools",
@@ -90,22 +83,5 @@ test("带空格或引号的参数会加双引号，日志里看得清", () => {
             "b c",
         ]),
         'node a.js "b c"',
-    );
-});
-
-test("标题用相对路径，跑单例时补「第 N 个用例」", () => {
-    assert.equal(buildRunTitle("tests/a/test_a.json"), "tests/a/test_a.json");
-    assert.equal(buildRunTitle("tests/a/test_a.json", 2), "tests/a/test_a.json 第 3 个用例");
-});
-
-test("批量标题：一个文件用单文件标题，多个写数量和第一个文件", () => {
-    assert.equal(buildBatchRunTitle([]), "0 个测试文件");
-    assert.equal(buildBatchRunTitle(["tests/a/test_a.json"]), "tests/a/test_a.json");
-    assert.equal(
-        buildBatchRunTitle([
-            "tests/a/test_a.json",
-            "tests/b/test_b.json",
-        ]),
-        "2 个测试文件（批量，含 tests/a/test_a.json 等）",
     );
 });

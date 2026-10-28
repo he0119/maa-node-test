@@ -9,7 +9,6 @@ export interface PlatformResourceDir {
     dirPath: string;
 }
 
-export {type PngSize} from "./png";
 import {type PngSize, readPngSizeFromFile} from "./png";
 /** 某张截图在某个「平台 / 资源」组合下的查找结果 */
 export interface ImageLocation {
@@ -55,17 +54,13 @@ export function locateImage(testsetRoot: string, imageName: string): ImageLocati
         if (!isFile(candidate)) {
             return {platform: dir.platform, resource: dir.resource, filePath: null, size: null};
         }
-        return {platform: dir.platform, resource: dir.resource, filePath: candidate, size: readPngSize(candidate)};
+        return {
+            platform: dir.platform,
+            resource: dir.resource,
+            filePath: candidate,
+            size: readPngSizeFromFile(candidate),
+        };
     });
-}
-
-/**
- * 只读 PNG 头 24 个字节拿尺寸，不把整张图读进内存（hover 会跟着鼠标反复触发）。
- * 文件不是 PNG 或者读不了返回 null。
- */
-/** 读一个 PNG 文件的尺寸（实现在 core/png.ts，全仓库一份） */
-export function readPngSize(filePath: string): PngSize | null {
-    return readPngSizeFromFile(filePath);
 }
 
 function isDirectory(target: string): boolean {

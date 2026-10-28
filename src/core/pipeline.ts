@@ -106,10 +106,3 @@ export function describeNodeBehavior(node: PipelineNode): string | undefined {
     if (node.action) parts.push(`Act: ${node.action}`);
     return parts.length > 0 ? parts.join(" · ") : undefined;
 }
-
-/** 光标路径是不是 `hits` 里的一项：`cases[n].hits[m]` 或 `cases[n].hits[m].node` */
-export function isHitsEntryPath(path: readonly (string | number)[]): boolean {
-    if (path.length === 4) return path[0] === "cases" && path[2] === "hits";
-    if (path.length === 5) return path[0] === "cases" && path[2] === "hits" && path[4] === "node";
-    return false;
-}

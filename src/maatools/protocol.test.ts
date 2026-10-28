@@ -1,9 +1,9 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
 
-import {fixtureResult} from "./fixtures.test-helper";
+import {fixtureResult} from "./result-builders.test-helper";
 import {validateListDocument, validateResultDocument, type ResultDocument} from "./protocol";
-import {reportFixtures} from "./report-fixtures.test-helper";
+import {upstreamReports} from "./upstream-reports.test-helper";
 
 const selection = {workspaceRoot: "/repo", testFiles: ["tests/test_a.json"]};
 
@@ -100,7 +100,7 @@ test("通过汇总不得吞掉底层失败检查或错误状态", () => {
 });
 
 test("实际maa-tools report输出：合法未执行占位和正常文件均保留", () => {
-    const result = structuredClone(reportFixtures.partialError);
+    const result = structuredClone(upstreamReports.partialError);
     validateResultDocument(result, {
         ...selection,
         testFiles: [
@@ -131,11 +131,11 @@ test("实际maa-tools report输出：部分缺图可以文件pass，全缺图err
         "allMissing",
         "empty",
     ] as const)
-        validate(reportFixtures[name]);
-    assert.equal(reportFixtures.partialMissing.files[0].verdict, "pass");
-    assert.equal(reportFixtures.partialMissing.files[0].cases[0].verdict, "skipped");
-    assert.equal(reportFixtures.allMissing.status, "error");
-    assert.equal(reportFixtures.empty.status, "empty");
+        validate(upstreamReports[name]);
+    assert.equal(upstreamReports.partialMissing.files[0].verdict, "pass");
+    assert.equal(upstreamReports.partialMissing.files[0].cases[0].verdict, "skipped");
+    assert.equal(upstreamReports.allMissing.status, "error");
+    assert.equal(upstreamReports.empty.status, "empty");
 });
 
 test("启动错误必须带错误代码；empty不能仅凭空groups猜测", () => {

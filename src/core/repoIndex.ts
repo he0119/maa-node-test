@@ -5,10 +5,10 @@ import type {RepoData} from "./completion";
 import type {LoaderEntry, LoaderMaps} from "./loaderMaps";
 import {describeNodeBehavior, describePipelineNode, parsePipelineNodes} from "./pipeline";
 import type {PipelineNode} from "./pipeline";
-import {EMPTY_LOADER_MAPS, dirOf, parseLoaderMaps, resolveControllerDir} from "./loaderMaps";
-import {parseControllerResources, resourcesForControllers} from "./resources";
-import type {ControllerResources} from "./resources";
-import {scanTestsetDirs} from "./testset";
+import {EMPTY_LOADER_MAPS, parseLoaderMaps, resolveControllerDir} from "./loaderMaps";
+import {parseControllerResources, resourcesForControllers} from "./controllerResources";
+import type {ControllerResources} from "./controllerResources";
+import {scanTestsetDirs} from "./screenshots";
 
 /**
  * pipeline 目录，节点名的来源。
@@ -319,5 +319,3 @@ function mtimeOf(target: string): number {
         return 0;
     }
 }
-
-export {dirOf};

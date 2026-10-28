@@ -1,10 +1,10 @@
 /**
  * 把 maa-tools test --list --json 的收集结果转成面板树描述：每个文件一个节点，每条用例一个子节点。
  * 收集和运行使用同一份配置；这里只显示收集结果，不解析测试文件。
- * 不 import vscode，实际 TestItem 由 src/testing.ts 创建。
+ * 不 import vscode，实际 TestItem 由 src/testController.ts 创建。
  */
 
-import {pathKey, toPosix} from "../maatools/paths";
+import {pathKey, toPosix} from "./paths";
 
 /** 收集结果里的一条用例（面板要用的字段） */
 export interface CollectedCase {

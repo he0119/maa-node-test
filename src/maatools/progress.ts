@@ -13,8 +13,8 @@ import {
     type RunFileResult,
     type TestRunEvent,
 } from "./protocol";
-import {adaptResultFiles, type CaseInfo} from "./results";
-import {pathKey} from "./paths";
+import {adaptResultFiles, type CaseInfo} from "./resultAdapter";
+import {pathKey} from "../core/paths";
 
 function originKey(origin: CaseOrigin): string {
     return `${pathKey(origin.file)}#${origin.case}`;

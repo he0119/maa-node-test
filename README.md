@@ -201,7 +201,7 @@ pnpm run package     # 生成 VSIX
 
 - [AGENTS.md](AGENTS.md)：项目范围、代码职责和约束。
 - [开发技能](.agents/skills/maa-node-test-dev/SKILL.md)：修改位置和验证方法。
-- [reference.md](.agents/skills/maa-node-test-dev/reference.md)：命令接口、结果格式和构建发布细节。
+- [reference.md](.agents/skills/maa-node-test-dev/reference.md)：逐文件职责、主要调用流程、命令接口、结果格式和测试构建入口。
 - [设计记录](.agents/notes/README.md)：已有设计的取舍。
 
 ## 致谢

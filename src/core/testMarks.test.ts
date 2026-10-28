@@ -7,8 +7,8 @@ import {
     describeVerdict,
     missingCaseVerdict,
     planFileMarking,
-} from "./testResult";
-import type {CaseVerdict} from "./testResult";
+} from "./testMarks";
+import type {CaseVerdict} from "./testMarks";
 
 const passed: CaseVerdict = {verdict: "pass", title: "通过", detail: [], durationMs: 12};
 const failed: CaseVerdict = {verdict: "fail", title: "ADB-官服 失败", detail: ["节点 `A` 没识别到"], durationMs: 7};

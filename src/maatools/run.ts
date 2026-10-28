@@ -1,12 +1,13 @@
 // 一次运行只启动一个 maa-tools test --jsonl；标准输出按行提供进度与最终报告。
 // 这里检查协议完整性、转发日志，并提供取消；不读取测试文件重判是否合法。
 
-import {spawn} from "node:child_process";
+import type {spawn} from "node:child_process";
 
-import {DEFAULT_CONFIG, buildMaaToolsArgs} from "../core/runnerArgs";
-import type {FileVerdict} from "../core/testResult";
-import {MaaToolsLoadError, describeMaaToolsSource, findMaaToolsCli} from "./cli";
-import {displayPath, resolveFromWorkspace} from "./paths";
+import {DEFAULT_CONFIG, buildMaaToolsArgs} from "./command";
+import type {FileVerdict} from "./protocol";
+import {runChild} from "./process";
+import {MaaToolsLoadError, describeMaaToolsSource, findMaaToolsCli} from "./installation";
+import {displayPath, resolveFromWorkspace} from "../core/paths";
 import {ResultFormatError, validateResultDocument, type ResultDocument, type TestRunEvent} from "./protocol";
 import {RunProgress} from "./progress";
 import {
@@ -15,12 +16,12 @@ import {
     renderCoverage,
     renderFileResults,
     renderMissingWarnings,
-} from "./render";
-import {adaptResultFiles, describeResultReason, type CaseInfo, type FileEntry} from "./results";
+} from "./output";
+import {adaptResultFiles, describeResultReason, type CaseInfo, type FileEntry} from "./resultAdapter";
 
 export type {ResultDocument} from "./protocol";
 
-export interface RunFlowRequest {
+export interface MaaToolsRunRequest {
     workspaceRoot: string;
     nodePath: string;
     configPath?: string;
@@ -32,14 +33,14 @@ export interface RunFlowRequest {
     expectedCases?: ReadonlyMap<string, readonly number[]>;
 }
 
-export interface RunFlowHandlers {
+export interface MaaToolsRunHandlers {
     onOutput?: (chunk: string) => void;
     onError?: (error: unknown) => void;
     /** 只交付已校验的进度；无回调时也消费全部标准输出记录并与最终报告核对。 */
     onProgress?: (event: TestRunEvent) => void;
 }
 
-export interface RunFlowOutcome {
+export interface MaaToolsRunOutcome {
     empty?: string;
     /** 进程、启动或结果协议错误；合法逐文件错误使用 fileResults/caseResults。 */
     error?: string;
@@ -54,12 +55,12 @@ export interface RunFlowOutcome {
     fileReasons: Map<string, string>;
 }
 
-export interface RunFlow {
-    done: Promise<RunFlowOutcome>;
+export interface MaaToolsRun {
+    done: Promise<MaaToolsRunOutcome>;
     cancel: () => void;
 }
 
-function emptyOutcome(): RunFlowOutcome {
+function emptyOutcome(): MaaToolsRunOutcome {
     return {
         cancelled: false,
         result: null,
@@ -93,7 +94,7 @@ export function describeRunError(result: Pick<ResultDocument, "errorCode" | "rea
 }
 
 /** 返回值包含全部可显示数据；意外异常也转为 outcome.error，不让 done reject。 */
-export function startRunFlow(request: RunFlowRequest, handlers: RunFlowHandlers = {}): RunFlow {
+export function startMaaToolsRun(request: MaaToolsRunRequest, handlers: MaaToolsRunHandlers = {}): MaaToolsRun {
     const emit = (lines: readonly string[]) => {
         if (lines.length > 0) handlers.onOutput?.(`${lines.join("\n")}\n`);
     };
@@ -105,7 +106,7 @@ export function startRunFlow(request: RunFlowRequest, handlers: RunFlowHandlers 
         cancelled = true;
         currentChild?.kill();
     };
-    const done = (async (): Promise<RunFlowOutcome> => {
+    const done = (async (): Promise<MaaToolsRunOutcome> => {
         const base = emptyOutcome();
         if (request.testFiles.length === 0 || (request.caseIndex != null && request.testFiles.length !== 1)) {
             return {
@@ -247,93 +248,4 @@ export function startRunFlow(request: RunFlowRequest, handlers: RunFlowHandlers 
             return outcome;
         });
     return {done, cancel};
-}
-
-interface ChildRun {
-    parsed: unknown;
-    stdout: string;
-    stderr: string;
-    exitCode: number | null;
-    signal?: NodeJS.Signals | null;
-    spawnError?: unknown;
-    streamError?: unknown;
-    incompleteLine?: boolean;
-}
-
-/** 标准 close 保证管道已排空；收集读单份 JSON，运行按完整行交给消费者。 */
-export function runChild(
-    cwd: string,
-    nodePath: string,
-    args: readonly string[],
-    onOutput: (chunk: string) => void,
-    register?: (child: ReturnType<typeof spawn>) => void,
-    onLine?: (line: string) => void,
-): Promise<ChildRun> {
-    return new Promise((resolve) => {
-        let child: ReturnType<typeof spawn>;
-        try {
-            child = spawn(nodePath, [...args], {
-                cwd,
-                stdio: [
-                    "ignore",
-                    "pipe",
-                    "pipe",
-                ],
-            });
-        } catch (error) {
-            resolve({parsed: null, stdout: "", stderr: "", exitCode: null, spawnError: error});
-            return;
-        }
-        register?.(child);
-        let stdout = "";
-        let stderr = "";
-        let pending = "";
-        let streamError: unknown;
-        let spawnError: unknown;
-        child.stdout?.setEncoding("utf8");
-        child.stderr?.setEncoding("utf8");
-        child.stdout?.on("data", (chunk: string) => {
-            stdout += chunk;
-            if (!onLine || streamError) return;
-            pending += chunk;
-            try {
-                let newline: number;
-                while ((newline = pending.indexOf("\n")) >= 0) {
-                    const line = pending.slice(0, newline);
-                    pending = pending.slice(newline + 1);
-                    onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
-                }
-            } catch (error) {
-                streamError = error instanceof Error ? error : new ResultFormatError("无法读取标准输出记录");
-                child.kill();
-            }
-        });
-        child.stderr?.on("data", (chunk: string) => {
-            stderr += chunk;
-            onOutput(chunk);
-        });
-        child.on("error", (error) => {
-            spawnError = error;
-        });
-        child.once("close", (exitCode, signal) => {
-            let parsed: unknown = null;
-            if (!onLine) {
-                try {
-                    parsed = JSON.parse(stdout);
-                } catch {
-                    /* 由收集调用方解释格式错误。 */
-                }
-            }
-            resolve({
-                parsed,
-                stdout,
-                stderr,
-                exitCode,
-                signal,
-                spawnError,
-                streamError,
-                incompleteLine: pending.length > 0,
-            });
-        });
-    });
 }

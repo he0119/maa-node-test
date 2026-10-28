@@ -1,7 +1,7 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
 import {DEFAULT_IMAGE_WIDTH, buildImageHoverMarkdown} from "./hover";
-import type {ImageLocation} from "./testset";
+import type {ImageLocation} from "./screenshots";
 
 const TESTSET_LABEL = "tests/MaaEndTestset";
 const WANG32_PNG = "/repo/tests/MaaEndTestset/Win32/Official_CN/帝江号_大世界.png";

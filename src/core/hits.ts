@@ -67,6 +67,13 @@ function childOf(node: Node, key: string): Node | undefined {
     return findNodeAtLocation(node, [key]);
 }
 
+/** 光标路径是不是 `hits` 里的一项：`cases[n].hits[m]` 或 `cases[n].hits[m].node` */
+export function isHitsEntryPath(path: readonly (string | number)[]): boolean {
+    if (path.length === 4) return path[0] === "cases" && path[2] === "hits";
+    if (path.length === 5) return path[0] === "cases" && path[2] === "hits" && path[4] === "node";
+    return false;
+}
+
 /** 内联提示最长显示多少个字，超过截断（提示是贴在代码行尾的，太长会挤走代码） */
 export const INLAY_MAX_CHARS = 32;
 

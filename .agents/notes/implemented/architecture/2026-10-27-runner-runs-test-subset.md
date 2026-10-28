@@ -10,6 +10,8 @@ Status: implemented
 
 ## Decision
 
+- VS Code 宿主职责分别放在 [testRunner.ts](../../../../src/testRunner.ts)、[testController.ts](../../../../src/testController.ts) 和 [toolVersionStatus.ts](../../../../src/toolVersionStatus.ts)，类名沿用 `NodeTestRunner`、`NodeTestExplorer`、`MaaToolsVersionStatus`。普通数据与文字转换不创建宿主对象，逐文件职责集中维护在 [reference](../../../skills/maa-node-test-dev/reference.md#文件职责)。
+- [collect.ts](../../../../src/maatools/collect.ts) 的 `collectTests()` 与 [run.ts](../../../../src/maatools/run.ts) 的 `startMaaToolsRun()` 直接共用 [process.ts](../../../../src/maatools/process.ts) 的进程读取；命令参数归 [command.ts](../../../../src/maatools/command.ts)，机器结论类型归 [protocol.ts](../../../../src/maatools/protocol.ts)，显示标记计划归 [testMarks.ts](../../../../src/core/testMarks.ts)，运行标题与摘要归 [runSummary.ts](../../../../src/core/runSummary.ts)。这让进程读写、机器数据与界面显示各有明确修改位置。
 - 使用被测仓库的 maa-tools 命令入口。扩展收集调用 `test --list --json`，扩展所有运行调用 `test --jsonl`；两者加载同一份配置与 `test.cases`，收集不初始化 MaaFramework。
 - maa-tools 版本放在主状态栏左侧，与 MaaSupport/MaaFramework 一样使用默认优先级，显示无图标的版本文字。被测仓库有配置或工具包即常显，点击整项刷新，悬浮保留完整来源；普通项目隐藏。查询与兼容提示共用结果，自动刷新和迟到保护沿用；运行数量仍用 priority 100 的原状态项。
 - 测试身份由框架读取文件时记录：每条用例的 `origin` 包含文件绝对路径与原始下标，loader 展开时保留。来源文件在 Windows 上按不区分大小写的规范化路径匹配、去重与对账，其他系统区分大小写；显示路径保留原有大小写。组名只用于显示，缺来源时明确报错，不猜。

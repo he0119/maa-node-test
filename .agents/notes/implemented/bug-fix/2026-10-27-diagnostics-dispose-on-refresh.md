@@ -9,8 +9,8 @@ Status: implemented
 ```text
 Error: illegal state - object is disposed
     at r.clear (…extensionHostProcess.js)
-    at NodeTestExplorer.reportMissingImages (src/testing.ts)
-    at NodeTestExplorer.refresh (src/testing.ts)
+    at NodeTestExplorer.reportMissingImages (src/testController.ts)
+    at NodeTestExplorer.refresh (src/testController.ts)
 ```
 
 症状比一条日志严重得多：测试面板先被清空、再没建回来（保存测试文件后面板变空），`image` 下面的缺图黄色波浪线从此整场会话都不再出现。
@@ -36,4 +36,4 @@ Error: illegal state - object is disposed
 - 保存测试文件后面板能正常刷新，缺图黄线在一次运行内持续有效；
 - 刷新路径和销毁路径彻底分开：现在只有 `dispose()` 一个地方会让诊断集合失效；
 - 代价是 `scheduleRefresh()` 与 `reportMissingImages()` 都会 `clear()` 一次（重复但幂等），换来的是「文件一改立刻擦掉旧黄线，300ms 后重扫再画」的即时感；
-- 验证方式：用假 `vscode` 模块加载 `out/testing.js`，连续触发两次文件变更事件。旧代码复现 2 条 `illegal state - object is disposed` 且面板节点数 1 → 0；改后 0 条异常、面板节点数保持 1。
+- 验证方式：用假 `vscode` 模块加载 `out/testController.js`，连续触发两次文件变更事件。旧代码复现 2 条 `illegal state - object is disposed` 且面板节点数 1 → 0；改后 0 条异常、面板节点数保持 1。

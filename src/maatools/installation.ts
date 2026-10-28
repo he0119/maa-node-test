@@ -9,7 +9,7 @@ import {spawn} from "node:child_process";
 import {existsSync, readFileSync} from "node:fs";
 import * as path from "node:path";
 
-/** 找不到仓库里的 maa-tools 命令行入口时抛这个，入口当作前置错误（RunFlowOutcome.error）。 */
+/** 找不到仓库里的 maa-tools 命令行入口时抛这个，入口当作前置错误（MaaToolsRunOutcome.error）。 */
 export class MaaToolsLoadError extends Error {
     constructor(message: string) {
         super(message);

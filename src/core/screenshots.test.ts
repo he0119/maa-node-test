@@ -3,9 +3,10 @@ import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import * as path from "node:path";
 import {test} from "node:test";
-import {locateImage, orderImageLocations, readPngSize, scanTestsetDirs} from "./testset";
+import {locateImage, orderImageLocations, scanTestsetDirs} from "./screenshots";
+import {readPngSizeFromFile} from "./png";
 
-/** 造一个只有 PNG 头 + IHDR 的假文件，够 readPngSize 读尺寸用了 */
+/** 造一个只有 PNG 头 + IHDR 的假文件，够 readPngSizeFromFile 读尺寸用了 */
 function fakePng(width: number, height: number): Buffer {
     const buffer = Buffer.alloc(33);
     Buffer.from([
@@ -122,16 +123,16 @@ test("image 里带路径分隔符时直接当找不到", (t) => {
     assert.deepEqual(locateImage(testset.root, "../Win32/Official_CN/帝江号_大世界.png"), []);
 });
 
-test("readPngSize 对非 PNG、缺失文件都返回 null", (t) => {
+test("readPngSizeFromFile 对非 PNG、缺失文件都返回 null", (t) => {
     const testset = makeTestset();
     t.after(testset.dispose);
 
-    assert.equal(readPngSize(path.join(testset.root, "README.md")), null);
-    assert.equal(readPngSize(path.join(testset.root, "Win32", "没有这张图.png")), null);
+    assert.equal(readPngSizeFromFile(path.join(testset.root, "README.md")), null);
+    assert.equal(readPngSizeFromFile(path.join(testset.root, "Win32", "没有这张图.png")), null);
 
     const truncated = path.join(testset.root, "Win32", "Official_CN", "半张.png");
     writeFileSync(truncated, fakePng(800, 600).subarray(0, 12));
-    assert.equal(readPngSize(truncated), null);
+    assert.equal(readPngSizeFromFile(truncated), null);
 });
 
 test("平台排序：声明过的按声明顺序排前面，没声明的按扫描顺序跟在后面", () => {

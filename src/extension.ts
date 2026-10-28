@@ -2,8 +2,8 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import {readNodeTestConfig, resolveNodeTestWorkspace} from "./config";
 import {isTestFilePath} from "./core/document";
-import {runTestList, type ListCase} from "./maatools/list";
-import {samePath} from "./maatools/paths";
+import {collectTests, type ListCase} from "./maatools/collect";
+import {samePath} from "./core/paths";
 import {RUN_CASE_COMMAND, RUN_FILE_COMMAND} from "./core/lens";
 import {NodeTestCodeLensProvider, TEST_FILE_SELECTOR} from "./providers/codeLens";
 import {resolveControllerDir} from "./core/loaderMaps";
@@ -12,10 +12,10 @@ import {NodeTestCompletionProvider} from "./providers/completion";
 import {NodeTestDefinitionProvider} from "./providers/definition";
 import {NodeTestHoverProvider} from "./providers/hover";
 import {NodeTestInlayHintsProvider} from "./providers/inlayHints";
-import {MaaToolsVersionStatus} from "./status";
-import {describeError, killRunningTests, NodeTestRunner} from "./runner";
-import type {RunRequest} from "./runner";
-import {NodeTestExplorer, REFRESH_TESTS_COMMAND} from "./testing";
+import {MaaToolsVersionStatus} from "./toolVersionStatus";
+import {describeError, killRunningTests, NodeTestRunner} from "./testRunner";
+import type {RunRequest} from "./testRunner";
+import {NodeTestExplorer, REFRESH_TESTS_COMMAND} from "./testController";
 
 /** 当前激活的 runner 和测试面板，只有 deactivate 时才会置空 */
 let runner: NodeTestRunner | undefined;
@@ -173,7 +173,7 @@ async function runOneCase(uriArgument: unknown, caseIndexArgument: unknown): Pro
 
     // 命令面板需要用户选择时，使用与实际运行同源的收集清单。
     const config = readNodeTestConfig();
-    const {doc, stderr} = await runTestList({
+    const {doc, stderr} = await collectTests({
         workspaceRoot: target.workspaceRoot,
         nodePath: config.nodePath,
         configPath: config.configPath,

@@ -1,15 +1,15 @@
 // 测试发现调用 maa-tools test --list --json 获取结构化清单，并使用与运行相同的配置。
 // 上游返回实际加载的文件、原始用例下标和源码偏移；扩展检查完整结构后转换显示路径。
 
-import {DEFAULT_CONFIG, buildMaaToolsArgs} from "../core/runnerArgs";
-import {MaaToolsLoadError, findMaaToolsCli} from "./cli";
-import {runChild} from "./flow";
-import {displayPath} from "./paths";
+import {DEFAULT_CONFIG, buildMaaToolsArgs} from "./command";
+import {MaaToolsLoadError, findMaaToolsCli} from "./installation";
+import {runChild} from "./process";
+import {displayPath} from "../core/paths";
 import {ResultFormatError, validateListDocument, type ListDocument} from "./protocol";
 
 export type {ListCase, ListDocument, ListFileEntry} from "./protocol";
 
-export interface TestListRequest {
+export interface TestCollectionRequest {
     workspaceRoot: string;
     nodePath: string;
     configPath?: string;
@@ -17,7 +17,9 @@ export interface TestListRequest {
     onOutput?: (chunk: string) => void;
 }
 
-export async function runTestList(request: TestListRequest): Promise<{doc: ListDocument | null; stderr: string}> {
+export async function collectTests(
+    request: TestCollectionRequest,
+): Promise<{doc: ListDocument | null; stderr: string}> {
     let cli;
     try {
         cli = findMaaToolsCli(request.workspaceRoot);

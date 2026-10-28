@@ -1,7 +1,7 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
 
-import {fixtureResult, platformResult} from "./fixtures.test-helper";
+import {fixtureResult, platformResult} from "./result-builders.test-helper";
 import {
     adaptResultFiles,
     caseInfoToVerdict,
@@ -10,7 +10,7 @@ import {
     describeResultReason,
     overallVerdict,
     summarizePlatforms,
-} from "./results";
+} from "./resultAdapter";
 
 test("使用上游原始下标和聚合结论，不从用例数量或明细反推", () => {
     const result = fixtureResult();

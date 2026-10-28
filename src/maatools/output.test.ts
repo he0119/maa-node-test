@@ -1,15 +1,15 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
 
-import {fixtureResult, platformResult} from "./fixtures.test-helper";
+import {fixtureResult, platformResult} from "./result-builders.test-helper";
 import {
     renderAllMissingNote,
     renderCaseSummaries,
     renderCoverage,
     renderFileResults,
     renderMissingWarnings,
-} from "./render";
-import {adaptResultFiles} from "./results";
+} from "./output";
+import {adaptResultFiles} from "./resultAdapter";
 
 test("日志使用上游原始索引，错误和缺图分别列出，不显示通过用例", () => {
     const result = fixtureResult();

@@ -1,9 +1,9 @@
 // 运行结果的中文日志；只排版上游事实，不决定测试结论。
 
-import {pathKey} from "./paths";
-import {caseKeyOf} from "../core/testResult";
+import {pathKey} from "../core/paths";
+import {caseKeyOf} from "../core/testMarks";
 
-import {formatCaseFailure, summarizePlatforms, type CaseInfo, type FileEntry} from "./results";
+import {formatCaseFailure, summarizePlatforms, type CaseInfo, type FileEntry} from "./resultAdapter";
 
 export function renderCoverage(entries: readonly FileEntry[]): string[] {
     const summary = summarizePlatforms(entries);

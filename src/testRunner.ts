@@ -2,23 +2,24 @@
 //
 // 这一层只管「拉起流程 + 收输出 + 按结果给提示」。两个调用方：
 //   - CodeLens / 命令（NodeTestRunner）：输出进输出面板，按结果弹提示；
-//   - 测试面板（src/testing.ts）：输出灌进 TestRun，按结构化结论标通过/失败。
+//   - 测试面板（src/testController.ts）：输出灌进 TestRun，按结构化结论标通过/失败。
 //
 // 扩展直接启动被测仓库安装的 maa-tools test --jsonl，采用上游的文件与用例汇总结论。
 
 import * as vscode from "vscode";
 
-import {buildBatchRunTitle, buildMaaToolsArgs, buildRunTitle, formatCommandLine} from "./core/runnerArgs";
-import {workspaceMaaToolsCli} from "./maatools/cli";
-import {displayPath, resolveFromWorkspace} from "./maatools/paths";
-import {caseOutcome, overallVerdict} from "./maatools/results";
-import {startRunFlow, type RunFlowOutcome, type RunFlowRequest} from "./maatools/flow";
+import {buildBatchRunTitle, buildRunTitle} from "./core/runSummary";
+import {buildMaaToolsArgs, formatCommandLine} from "./maatools/command";
+import {workspaceMaaToolsCli} from "./maatools/installation";
+import {displayPath, resolveFromWorkspace} from "./core/paths";
+import {caseOutcome, overallVerdict} from "./maatools/resultAdapter";
+import {startMaaToolsRun, type MaaToolsRunOutcome, type MaaToolsRunRequest} from "./maatools/run";
 import type {TestRunEvent} from "./maatools/protocol";
 
-export type {RunFlowOutcome} from "./maatools/flow";
+export type {MaaToolsRunOutcome} from "./maatools/run";
 
 /** 命令与测试面板使用同一份文件选择和启动参数。 */
-export interface RunRequest extends RunFlowRequest {
+export interface RunRequest extends MaaToolsRunRequest {
     configPath: string;
     caseIndex?: number;
 }
@@ -34,7 +35,7 @@ export interface TestProcessHandlers {
 
 export interface TestProcess {
     /** 流程结束，包含经过完整性检查的文件与用例结果。 */
-    done: Promise<RunFlowOutcome>;
+    done: Promise<MaaToolsRunOutcome>;
     /** 停掉这次运行。之后再调用无害 */
     cancel: () => void;
 }
@@ -78,7 +79,7 @@ function relativePathsOf(request: RunRequest): string[] {
  * 返回的 handle 可取消；插件卸载时会统一停掉所有还在跑的运行。
  */
 export function startTestRun(request: RunRequest, handlers: TestProcessHandlers = {}): TestProcess {
-    const flowRequest: RunFlowRequest = {
+    const flowRequest: MaaToolsRunRequest = {
         workspaceRoot: request.workspaceRoot,
         nodePath: request.nodePath,
         configPath: request.configPath,
@@ -87,7 +88,7 @@ export function startTestRun(request: RunRequest, handlers: TestProcessHandlers 
         expectedCases: request.expectedCases,
     };
 
-    const flow = startRunFlow(flowRequest, handlers);
+    const flow = startMaaToolsRun(flowRequest, handlers);
     const handle: TestProcess = {
         done: flow.done.finally(() => activeProcesses.delete(handle)),
         cancel: () => {
@@ -139,7 +140,7 @@ export class NodeTestRunner implements vscode.Disposable {
     }
 
     /** 结果到人话提示。口径和测试面板一致：缺图跳过 ≠ 通过 */
-    private async report(outcome: RunFlowOutcome, title: string): Promise<void> {
+    private async report(outcome: MaaToolsRunOutcome, title: string): Promise<void> {
         if (outcome.empty) {
             const action = await vscode.window.showWarningMessage(
                 `没有匹配到任何用例：${title}。${outcome.empty}`,

@@ -2,13 +2,11 @@
 // 不重新计算测试结论；所选用例缺少结果时，明确报结果不完整。
 // 不 import vscode，便于在普通 Node 环境验证。
 
-import {pathKey} from "../maatools/paths";
+import {pathKey} from "./paths";
 
-/** 文件跳过仅表示本次筛选未选择用例。 */
-export type FileVerdict = "pass" | "fail" | "error" | "skipped";
+import type {CaseOutcome, FileVerdict} from "../maatools/protocol";
 
-/** 单条用例还可以被跳过，表示至少有平台没有完成验证，不能标成用例通过。 */
-export type CaseOutcome = FileVerdict | "skipped";
+export type {CaseOutcome, FileVerdict} from "../maatools/protocol";
 
 /** 单条用例的结论、原因和识别耗时，均来自 maa-tools 的结构化结果。 */
 export interface CaseVerdict {

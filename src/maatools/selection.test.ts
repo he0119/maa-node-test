@@ -1,15 +1,15 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
 
-import {caseKeyOf, planFileMarking} from "../core/testResult";
-import {fileNodeId, caseNodeId} from "../core/testExplorer";
+import {caseKeyOf, planFileMarking} from "../core/testMarks";
+import {fileNodeId, caseNodeId} from "../core/testTree";
 import {buildRunSummary} from "../core/runSummary";
-import {fixtureResult} from "./fixtures.test-helper";
-import {displayPath, pathKey, resolveFromWorkspace} from "./paths";
+import {fixtureResult} from "./result-builders.test-helper";
+import {displayPath, pathKey, resolveFromWorkspace} from "../core/paths";
 import {RunProgress} from "./progress";
 import {validateListDocument, validateResultDocument, type ResultDocument, type TestRunEvent} from "./protocol";
-import {adaptResultFiles, overallVerdict} from "./results";
-import {renderFileResults} from "./render";
+import {adaptResultFiles, overallVerdict} from "./resultAdapter";
+import {renderFileResults} from "./output";
 
 function onPlatform<T>(platform: NodeJS.Platform, action: () => T): T {
     const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;

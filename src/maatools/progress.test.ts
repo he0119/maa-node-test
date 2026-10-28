@@ -1,7 +1,7 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
 
-import {fileCase, fixtureResult} from "./fixtures.test-helper";
+import {fileCase, fixtureResult} from "./result-builders.test-helper";
 import {RunProgress} from "./progress";
 import {
     validateResultDocument,
@@ -10,7 +10,7 @@ import {
     type ResultSelection,
     type TestRunEvent,
 } from "./protocol";
-import {reportFixtures} from "./report-fixtures.test-helper";
+import {upstreamReports} from "./upstream-reports.test-helper";
 
 const selection: ResultSelection = {
     workspaceRoot: "/repo",
@@ -126,7 +126,7 @@ test("最终补全缺失事件，进度与最终整批状态和墙钟时间可�
 
 test("单case快照文件error不妨碍最终文件因其他有效用例而pass", () => {
     const progress = new RunProgress(selection);
-    const skipped = structuredClone(reportFixtures.allMissing);
+    const skipped = structuredClone(upstreamReports.allMissing);
     progress.accept(caseEvent(1, skipped));
     const result = structuredClone(skipped);
     const passed = fileCase(result.files[0].file, 3);

@@ -1,6 +1,6 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
-import {buildRunSummary, formatDuration} from "./runSummary";
+import {buildBatchRunTitle, buildRunSummary, buildRunTitle, formatDuration} from "./runSummary";
 import type {SummaryCase, SummaryFile} from "./runSummary";
 
 const pass = (caseIndex: number): SummaryCase => ({caseIndex, verdict: "pass", title: "通过"});
@@ -17,6 +17,23 @@ function file(overrides: Partial<SummaryFile> = {}): SummaryFile {
         ...overrides,
     };
 }
+
+test("标题用相对路径，跑单例时补「第 N 个用例」", () => {
+    assert.equal(buildRunTitle("tests/a/test_a.json"), "tests/a/test_a.json");
+    assert.equal(buildRunTitle("tests/a/test_a.json", 2), "tests/a/test_a.json 第 3 个用例");
+});
+
+test("批量标题：一个文件用单文件标题，多个写数量和第一个文件", () => {
+    assert.equal(buildBatchRunTitle([]), "0 个测试文件");
+    assert.equal(buildBatchRunTitle(["tests/a/test_a.json"]), "tests/a/test_a.json");
+    assert.equal(
+        buildBatchRunTitle([
+            "tests/a/test_a.json",
+            "tests/b/test_b.json",
+        ]),
+        "2 个测试文件（批量，含 tests/a/test_a.json 等）",
+    );
+});
 
 test("全部通过：只统计明确返回的通过结果，不逐条刷屏", () => {
     assert.deepEqual(

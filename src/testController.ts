@@ -4,19 +4,18 @@ import type {NodeTestWorkspace} from "./config";
 import {parseTestDocument} from "./core/document";
 import {collectMissingImages, describeMissingImage, summarizeMissingImage} from "./core/missingImages";
 import type {MissingImageWarning} from "./core/missingImages";
-import {locateImage} from "./core/testset";
-import {buildBatchRunTitle, buildRunTitle} from "./core/runnerArgs";
-import {buildMessageMarkdown, planFileMarking, caseKeyOf, missingCaseVerdict} from "./core/testResult";
-import type {CaseOutcome, CaseVerdict, FileVerdict, VerdictText} from "./core/testResult";
-import {buildRunSummary} from "./core/runSummary";
+import {locateImage} from "./core/screenshots";
+import {buildMessageMarkdown, planFileMarking, caseKeyOf, missingCaseVerdict} from "./core/testMarks";
+import type {CaseOutcome, CaseVerdict, FileVerdict, VerdictText} from "./core/testMarks";
+import {buildBatchRunTitle, buildRunSummary, buildRunTitle} from "./core/runSummary";
 import type {SummaryFile, SummaryInput} from "./core/runSummary";
-import {buildFileNode, collectRunTargets, folderSegments} from "./core/testExplorer";
-import {adaptResultFiles, caseInfoToVerdict} from "./maatools/results";
-import {runTestList, type ListFileEntry} from "./maatools/list";
-import {displayPath, pathKey, resolveFromWorkspace} from "./maatools/paths";
+import {buildFileNode, collectRunTargets, folderSegments} from "./core/testTree";
+import {adaptResultFiles, caseInfoToVerdict} from "./maatools/resultAdapter";
+import {collectTests, type ListFileEntry} from "./maatools/collect";
+import {displayPath, pathKey, resolveFromWorkspace} from "./core/paths";
 import type {TestRunEvent} from "./maatools/protocol";
-import {describeCommand, startTestRun} from "./runner";
-import type {RunFlowOutcome, RunRequest} from "./runner";
+import {describeCommand, startTestRun} from "./testRunner";
+import type {MaaToolsRunOutcome, RunRequest} from "./testRunner";
 
 /**
  * 测试面板：调用 maa-tools 收集测试，按目录、文件、用例建树，再显示结构化运行结果。
@@ -161,7 +160,7 @@ export class NodeTestExplorer implements vscode.Disposable {
      */
     private async collectTestFiles(workspaceRoot: string, sequence: number): Promise<TestFileEntry[]> {
         const config = readNodeTestConfig();
-        const {doc, stderr} = await runTestList({
+        const {doc, stderr} = await collectTests({
             workspaceRoot,
             nodePath: config.nodePath,
             configPath: config.configPath,
@@ -356,7 +355,7 @@ export class NodeTestExplorer implements vscode.Disposable {
                     item,
                 ]) => item,
             );
-            const targets = collectTargets(request, roots, this.leaves);
+            const targets = collectRunTargets(request, roots, this.leaves);
             if (targets.length === 0) {
                 await vscode.window.showWarningMessage(
                     "当前选择没有可运行的测试。请检查排除项，并刷新测试面板确认配置收集到了所需文件和用例。",
@@ -472,7 +471,7 @@ export class NodeTestExplorer implements vscode.Disposable {
     private markCompletedResults(
         testRun: vscode.TestRun,
         targets: readonly RunTarget[],
-        outcome: RunFlowOutcome,
+        outcome: MaaToolsRunOutcome,
         state: RunState,
     ): void {
         const caseVerdicts = buildCaseVerdicts(outcome);
@@ -742,19 +741,6 @@ export class NodeTestExplorer implements vscode.Disposable {
     }
 }
 
-/**
- * 把运行全部、目录、文件和单条选择转换为目标。
- * 排除某条用例时，把文件展开成剩余用例；没有排除项的文件仍可合成一次批量运行。
- * 同一目标只运行一次；排除父目录或文件时，直接选中的子用例也不运行。
- */
-export function collectTargets(
-    request: vscode.TestRunRequest,
-    rootItems: readonly vscode.TestItem[],
-    leaves: ReadonlyMap<string, LeafInfo>,
-): RunTarget[] {
-    return collectRunTargets(request, rootItems, leaves);
-}
-
 function targetItems(target: RunTarget, state: RunState): vscode.TestItem[] {
     return [
         target.item,
@@ -824,7 +810,7 @@ function buildTestMessage(title: string, detail: readonly string[]): vscode.Test
 }
 
 /** 逐用例显示文案；键已由 adapter 统一成相对路径和原始下标。 */
-function buildCaseVerdicts(outcome: Pick<RunFlowOutcome, "caseResults">): Map<string, CaseVerdict> {
+function buildCaseVerdicts(outcome: Pick<MaaToolsRunOutcome, "caseResults">): Map<string, CaseVerdict> {
     return new Map(
         [...outcome.caseResults].map(
             ([
@@ -854,7 +840,7 @@ function reasonText(reason: string | undefined, verdict: FileVerdict = "error"):
 }
 
 /** 文件键口径：相对路径统一正斜杠，和归位结果的键对齐 */
-function fileVerdictOf(outcome: RunFlowOutcome, relativePath: string): FileVerdict | undefined {
+function fileVerdictOf(outcome: MaaToolsRunOutcome, relativePath: string): FileVerdict | undefined {
     return outcome.fileResults.get(pathKey(relativePath));
 }
 

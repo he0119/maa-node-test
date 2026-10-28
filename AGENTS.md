@@ -10,20 +10,24 @@
 
 - **maa-tools**：加载配置和 `test.cases`、解析测试文件、保留来源、收集与选择用例、固定待检查节点、运行识别、判定并汇总文件和整批结果。
 - **扩展**：把用户选择转换为命令参数、调用与取消进程、检查机器结果是否支持且完整、显示中文原因与 VS Code 标记。不从日志或截图反推运行结论，不再次解析目标文件来判定是否能运行。
-- **编辑辅助**：`core/document.ts` 可以解析未保存文本用于 CodeLens、补全、悬浮和缺图提示。这些结果不决定测试的实际范围或通过与否。测试集目录扫描和 loader 字符串映射不能代替运行时配置。
+- **编辑辅助**：[core/document.ts](src/core/document.ts) 可以解析未保存文本用于 CodeLens、补全、悬浮和缺图提示。这些结果不决定测试的实际范围或通过与否。测试集目录扫描和 loader 字符串映射不能代替运行时配置。
 
 ## 代码地图
 
+文件职责集中维护在 [reference 的逐文件表](.agents/skills/maa-node-test-dev/reference.md#文件职责)，源码注释解释局部约束或容易误解的行为。
+
 | 位置 | 职责 |
 | --- | --- |
-| `src/extension.ts` | 装配 provider、命令、输出面板、测试面板和版本状态栏 |
-| `src/config.ts` | 读取设置，选择被测工作区，解析配置和编辑辅助目录 |
-| `src/status.ts`、`src/core/toolStatus.ts` | 左侧版本状态栏、来源说明、刷新与兼容提示，共用一次版本查询 |
-| `src/runner.ts` | 管理运行、输出和提示；CodeLens 与命令共用它，测试面板复用同一启动函数 |
-| `src/testing.ts` | 收集后建树、挑选运行范围、排除与取消、逐文件和用例标记 |
-| `src/providers/` | 把编辑辅助结果转换为 VS Code 对象 |
-| `src/core/` | 与 VS Code 无关的编辑辅助、命令参数、树描述、结果文案和计数 |
-| `src/maatools/` | 查找命令入口、收集、启动运行、校验机器结果、转换显示数据和日志；包含文件与进程操作 |
+| [src/extension.ts](src/extension.ts) | 装配编辑辅助、命令、输出面板、测试面板和版本状态栏，管理仓库索引预热 |
+| [src/config.ts](src/config.ts) | 读取设置，选择被测工作区，解析配置和编辑辅助目录 |
+| [src/toolVersionStatus.ts](src/toolVersionStatus.ts) | `MaaToolsVersionStatus` 管理版本状态栏、查询与兼容提示；[core/toolStatus.ts](src/core/toolStatus.ts) 生成文字，共用一次版本查询 |
+| [src/testRunner.ts](src/testRunner.ts) | `NodeTestRunner` 管理命令与 CodeLens 的运行、输出和提示；测试面板复用 `startTestRun()` |
+| [src/testController.ts](src/testController.ts) | `NodeTestExplorer` 收集后建树、选择运行范围、排除与取消，更新逐文件和用例标记 |
+| `src/providers/` | 将编辑辅助的普通数据和文字转换为 VS Code 对象 |
+| `src/core/` | 编辑文本解析、截图与仓库资料读取、路径、树描述、标记计划、标题和计数；不导入 VS Code |
+| `src/maatools/` | 命令参数、安装入口与版本、进程读取、收集、运行、机器协议校验、显示转换和日志排版；不导入 VS Code |
+
+收集与运行直接共用 [maatools/process.ts](src/maatools/process.ts)；机器结论类型归 [maatools/protocol.ts](src/maatools/protocol.ts)，标题归 [core/runSummary.ts](src/core/runSummary.ts)。截图扫描使用 [core/screenshots.ts](src/core/screenshots.ts)，PNG 文件头读取独立放在 [core/png.ts](src/core/png.ts)。
 
 ## 硬约束
 
