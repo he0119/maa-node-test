@@ -1,5 +1,8 @@
 // 运行结果的中文日志；只排版上游事实，不决定测试结论。
 
+import {pathKey} from "./paths";
+import {caseKeyOf} from "../core/testResult";
+
 import {formatCaseFailure, summarizePlatforms, type CaseInfo, type FileEntry} from "./results";
 
 export function renderCoverage(entries: readonly FileEntry[]): string[] {
@@ -39,13 +42,14 @@ export function renderAllMissingNote(missing: readonly {path: string}[]): string
 }
 
 export function renderFileResults(entries: readonly FileEntry[], fileResults: ReadonlyMap<string, string>): string[] {
-    const mark = (verdict: string) => (verdict === "pass" ? "✓" : verdict === "fail" ? "✗" : "！");
+    const mark = (verdict: string) =>
+        verdict === "pass" ? "✓" : verdict === "fail" ? "✗" : verdict === "skipped" ? "↷" : "！";
     return [
         "",
         "按文件结果：",
         ...entries.map((entry) => {
             const reason = entry.reason ?? entry.error;
-            return `  ${mark(fileResults.get(entry.key) ?? "error")} ${entry.key}${reason ? `：${reason}` : ""}`;
+            return `  ${mark(fileResults.get(pathKey(entry.key)) ?? "error")} ${entry.key}${reason ? `：${reason}` : ""}`;
         }),
     ];
 }
@@ -58,7 +62,7 @@ export function renderCaseSummaries(
     const skipped: string[] = [];
     for (const entry of entries) {
         for (const testCase of entry.cases) {
-            const info = caseResults.get(`${entry.key}#${testCase.index}`);
+            const info = caseResults.get(caseKeyOf(entry.key, testCase.index));
             if (!info || info.verdict === "pass") continue;
             const lines = info.verdict === "skipped" ? skipped : failures;
             if (lines.length === 0) {

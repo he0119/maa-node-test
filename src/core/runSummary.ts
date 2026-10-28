@@ -41,6 +41,7 @@ export function buildRunSummary(input: SummaryInput): string[] {
     const passedFiles = files.filter((file) => file.verdict === "pass");
     const failedFiles = files.filter((file) => file.verdict === "fail");
     const errorFiles = files.filter((file) => file.verdict === "error");
+    const skippedFiles = files.filter((file) => file.verdict === "skipped");
     const passedCases = collectCases(files, "pass");
     const failedCases = collectCases(files, "fail");
     const errorCases = collectCases(files, "error");
@@ -50,8 +51,10 @@ export function buildRunSummary(input: SummaryInput): string[] {
         .filter((entry) => entry.count > 0);
     const unknownCases = missingResults.reduce((sum, entry) => sum + entry.count, 0);
 
-    lines.push(summarizeVerdict({passedFiles, failedFiles, errorFiles, skippedCases, unknownCases, error}));
-    lines.push(formatFileCounts(passedFiles.length, failedFiles.length, errorFiles.length));
+    lines.push(
+        summarizeVerdict({passedFiles, failedFiles, errorFiles, skippedFiles, skippedCases, unknownCases, error}),
+    );
+    lines.push(formatFileCounts(passedFiles.length, failedFiles.length, errorFiles.length, skippedFiles.length));
     lines.push(
         formatCaseCounts(passedCases.length, failedCases.length, errorCases.length, skippedCases.length, unknownCases),
     );
@@ -83,6 +86,10 @@ export function buildRunSummary(input: SummaryInput): string[] {
         for (const {file, count} of missingResults)
             lines.push(`  ${file.relativePath} · ${count} 条所选用例没有结果，不能确认是否通过`);
     }
+    if (skippedFiles.length > 0) {
+        lines.push("", `筛选跳过（${skippedFiles.length} 个文件）：`);
+        for (const file of skippedFiles) lines.push(`  ${file.relativePath} · ${file.reason ?? "本次筛选未选择用例"}`);
+    }
     if (skippedCases.length > 0) {
         lines.push("", `缺图跳过（${skippedCases.length} 条，不算失败）：`);
         for (const entry of skippedCases) lines.push(describeCase(entry));
@@ -95,11 +102,12 @@ function summarizeVerdict(input: {
     passedFiles: readonly SummaryFile[];
     failedFiles: readonly SummaryFile[];
     errorFiles: readonly SummaryFile[];
+    skippedFiles: readonly SummaryFile[];
     skippedCases: readonly SummaryCase[];
     unknownCases: number;
     error?: string;
 }): string {
-    const {passedFiles, failedFiles, errorFiles, skippedCases, unknownCases, error} = input;
+    const {passedFiles, failedFiles, errorFiles, skippedFiles, skippedCases, unknownCases, error} = input;
     const reasons: string[] = [];
     if (failedFiles.length > 0) reasons.push(`${failedFiles.length} 个文件失败`);
     if (errorFiles.length > 0) reasons.push(`${errorFiles.length} 个文件没有完成验证`);
@@ -110,18 +118,20 @@ function summarizeVerdict(input: {
         return `结论：没通过 —— ${reasons.join("、")}${tail}`;
     }
     // 一条聚合用例 skipped 可能表示部分平台缺图，是否已有效验证由上游文件结论决定。
-    if (passedFiles.length === 0) return "结论：没有验证到任何用例";
+    if (passedFiles.length === 0)
+        return skippedFiles.length > 0 ? "结论：本次筛选未选择可运行用例" : "结论：没有验证到任何用例";
     return skippedCases.length > 0
         ? `结论：通过（其中 ${skippedCases.length} 条用例未在全部平台完成验证）`
         : "结论：通过";
 }
 
-function formatFileCounts(passed: number, failed: number, error: number): string {
-    const total = passed + failed + error;
+function formatFileCounts(passed: number, failed: number, error: number, skipped: number): string {
+    const total = passed + failed + error + skipped;
     if (total === 0) return "文件 0 个";
     const parts = [`通过 ${passed}`];
     if (failed > 0) parts.push(`失败 ${failed}`);
     if (error > 0) parts.push(`没有完成验证 ${error}`);
+    if (skipped > 0) parts.push(`筛选跳过 ${skipped}`);
     return `文件 ${total} 个：${parts.join(" · ")}`;
 }
 

@@ -130,15 +130,21 @@ test("读取失败的文件：节点说明里带原因，没有用例子节点",
     assert.equal(node.cases.length, 0);
 });
 
-test("toPosix 把反斜杠转成斜杠，测试面板标题在 Windows 上也不会难看", () => {
-    assert.equal(toPosix("tests\\Common\\Button\\test_x.json"), "tests/Common/Button/test_x.json");
+test("Windows目录分隔符转正斜杠，其他系统保留文件名中的反斜杠", () => {
+    assert.equal(
+        toPosix("tests\\Common\\Button\\test_x.json"),
+        process.platform === "win32" ? "tests/Common/Button/test_x.json" : "tests\\Common\\Button\\test_x.json",
+    );
     assert.equal(toPosix("tests/Common/test_x.json"), "tests/Common/test_x.json");
 });
 
 test("fileNameOf 取路径最后一段", () => {
     assert.equal(fileNameOf("tests/Common/Button/test_close_button.json"), "test_close_button.json");
     assert.equal(fileNameOf("test_x.json"), "test_x.json");
-    assert.equal(fileNameOf("tests\\Windows\\test_x.json"), "test_x.json");
+    assert.equal(
+        fileNameOf("tests\\Windows\\test_x.json"),
+        process.platform === "win32" ? "test_x.json" : "tests\\Windows\\test_x.json",
+    );
 });
 
 test("folderSegments：去掉文件名和开头的 tests 段，给出面板分组层级", () => {

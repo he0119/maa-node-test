@@ -2,8 +2,10 @@
 // 不重新计算测试结论；所选用例缺少结果时，明确报结果不完整。
 // 不 import vscode，便于在普通 Node 环境验证。
 
-/** 单个文件的结论 */
-export type FileVerdict = "pass" | "fail" | "error";
+import {pathKey} from "../maatools/paths";
+
+/** 文件跳过仅表示本次筛选未选择用例。 */
+export type FileVerdict = "pass" | "fail" | "error" | "skipped";
 
 /** 单条用例还可以被跳过，表示至少有平台没有完成验证，不能标成用例通过。 */
 export type CaseOutcome = FileVerdict | "skipped";
@@ -35,11 +37,12 @@ export interface VerdictText {
 
 /** 逐用例结论的键：相对路径 + 用例下标。 */
 export function caseKeyOf(relativePath: string, caseIndex: number): string {
-    return `${relativePath.replace(/\\/g, "/")}#${caseIndex}`;
+    return `${pathKey(relativePath)}#${caseIndex}`;
 }
 
 /** 上游未给具体原因时使用的说明。 */
 export function describeVerdict(verdict: FileVerdict, title: string): VerdictText {
+    if (verdict === "skipped") return {title: "筛选跳过", detail: ["本次筛选未选择该文件中的用例。"]};
     if (verdict === "fail") {
         return {
             title: "断言失败",

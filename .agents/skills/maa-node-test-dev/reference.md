@@ -24,7 +24,7 @@
 | `maatools/progress.ts` | 已开始与已完成事实、相同重复去重、矛盾检查、最终对账，以及取消时可保留的结果 |
 | `maatools/results.ts` | 将已校验的上游文件/用例结果转换为显示数据和中文原因 |
 | `maatools/render.ts` | 把已知结果与实际截图路径排成日志 |
-| `maatools/paths.ts` | 解析请求路径，绝对路径转换为显示用的相对路径 |
+| `maatools/paths.ts` | 按系统规则比较路径，解析请求路径并保留显示大小写 |
 | `core/document.ts`、`core/lens.ts` | 编辑文本解析与 CodeLens 描述，不决定实际运行输入是否合法 |
 | `core/testset.ts`、`core/png.ts`、`core/hover.ts` | 扫描编辑辅助截图目录、读取图片尺寸、排序和拼预览 |
 | `core/missingImages.ts` | 编辑时的缺图提示及源码范围 |
@@ -79,7 +79,7 @@ node node_modules/@nekosu/maa-tools/bin/maa-tools --version
 ```
 
 - 非默认 `configPath` 同时传给收集与运行。`testsetDir` 是编辑辅助设置，不传给运行以覆盖框架图片路径。
-- `--file` 按规范化绝对来源精确匹配，可重复；相对路径相对命令工作目录。
+- `--file` 按规范化绝对来源匹配，可重复；相对路径相对命令工作目录。Windows 匹配、去重与进度及最终对账忽略来源路径大小写，其他系统区分大小写；显示路径保留原有大小写。
 - `--case` 为文件内原始下标，从 0 开始，可重复选择多条，但必须配单个文件。CLI 要求完整的非负十进制安全整数；越界属于参数错误。
 - 控制器、资源和来源过滤取交集。展开时先固定完整待检查节点，选择单条不会删除该组其他节点的“不应命中”检查。
 - `--list` 选择收集，`--json` 选择格式，可组合：单独 `--list` 显示人类列表，扩展用 `--list --json` 读取一份清单。两种列表都不初始化 MaaFramework。
@@ -117,7 +117,9 @@ errorCode?: string
 reason?: string
 ```
 
-`files[]` 由 maa-tools 统一汇总，是扩展显示文件和用例结论的依据。每个文件包含收集元数据、`selectedCases`、`verdict`、可选 `reason` 和 `cases`。`selectedCases` 是本次计划运行的原始下标；`cases` 必须完整覆盖该列表，不要求从 0 连续排列。
+`files[]` 由 maa-tools 汇总，包含元数据、`selectedCases`、`verdict`（pass/fail/error/skipped）、可选 `reason` 和 `cases`。`selectedCases` 是本次计划下标，允许不连续，`cases` 必须完整覆盖它。无文件错误且过滤后本次 cases 为空时，文件为 skipped、reason 为 `no-cases-selected`，两个数组都为空。
+
+扩展仍严格检查请求范围：指定单条 `caseIndex`，或已知 `expectedCases` 非空时，拒绝这种空的跳过结果。只有未指定单条，且预期下标列表为空或未提供时才可接收；不重读文件猜计划，也不放行有选择却缺结果的报告。
 
 每条文件用例包含收集元数据、`verdict`、`durationMs`、可选 `reason` 和 `platforms[]`。每个平台项含 `controller`、`resource`、`result`；平台结果给出检查明细、单个 `origin` 和结论。已解析图片路径时，`imagePath` 是实际绝对路径；尚未执行的 error 占位结果可以为空字符串，不能当成实际尝试过该路径。控制器及资源是组配置声明值，不是截图目录别名。
 
@@ -131,8 +133,8 @@ reason?: string
 | --- | --- |
 | 单平台用例 | 检查为 pass/fail，应返回却缺失节点结果也为 fail；缺图为 skipped；没有待检查节点或计划未能执行为 error |
 | 跨平台用例 | fail 优先，其次 error；有平台缺图则 skipped；其余为 pass |
-| 文件 | 有用例失败为 fail，其次 error；至少有一个平台完成有效检查且其余只是缺图跳过时可 pass；没有有效检查为 error |
-| 整批 | error 优先于 failed，再是 passed；没有匹配用例为 empty，错误代码为 `no-tests-matched` |
+| 文件 | 无文件错误且本次 cases 为空时为 skipped/no-cases-selected；其余有用例失败为 fail，其次 error；有有效检查且其余仅缺图时可 pass，全缺图无验证仍为 error |
+| 整批 | error 优先于 failed，再是 passed；空选择文件不影响其他文件的真实结论，全部过滤为空仍为 empty/no-tests-matched |
 
 **用例标灰不等于它在所有平台都没运行。** 例如 A 平台已有有效检查并通过、B 平台缺图，该用例汇总为 skipped，文件可为 pass，同时列明 B 未验证。即使每条用例汇总都是 skipped，也不能只看这个值就断言文件“全缺图”；应直接用框架给出的文件结论。
 
@@ -161,7 +163,7 @@ reason?: string
 | `file-result` | `file`、`result` | 文件所有 selectedCases 都有确定结果；快照只含该文件的本次选择范围 |
 | `run-result` | `result` | 唯一且最后，包含完整 TestRunResult；由运行入口处理，不传给面板的进度回调 |
 
-框架在每张图的全部节点块完成后立即判定，同图复用用例分别比较自己的期望；来源的最后一个计划平台结束后才发用例结果。缺图、无节点等可以直接完成，不伪造识别开始；尚未形成计划的配置错误仅由最终结果说明。资源组和测试组仍按计划处理，组内识别任务并行，不改成逐文件进程。
+框架在每张图的全部节点块完成后立即判定，同图复用用例分别比较自己的期望；来源的最后一个计划平台结束后才发用例结果。缺图、无节点及空选择文件可以直接完成，不伪造识别开始；空文件快照沿用 skipped/no-cases-selected 及严格范围校验。尚未形成计划的配置错误仅由最终结果说明。资源组和测试组仍按计划处理，组内识别任务并行，不改成逐文件进程。
 
 快照的 groups 同样限定在对应范围，并复用最终报告的汇总规则。用例快照按单文件、单原始下标校验；文件快照按该文件的 expectedCases 校验。记录还检查版本、类型、请求来源、原始下标和快照身份，未经校验的标准输出记录不能直接交给面板。
 
@@ -183,7 +185,7 @@ reason?: string
 - 一次面板运行中的目标依次执行。所选项先标 enqueued；case-started 才标该用例及文件运行中；case-result 立即结束用例，file-result 立即结束文件并补此前未逐条报告的子用例。最终报告只补未完成项，不把已完成项重新标为 started。
 - 取消请求传给共用运行入口并终止 maa-tools 子进程。面板保留已校验完成的用例和文件，未完成项标 skipped；摘要仍只显示取消与耗时，不给部分运行作整批判断。跨平台的子进程退出行为需要分别验证。
 - `caseInfoToVerdict()` 使用上游 verdict，只转换中文消息和耗时。`planFileMarking()` 不把无结果的子节点标通过，也不重新覆盖正确的文件判定。
-- 摘要统计明确的 pass、fail、error、skipped；缺少结果单列。前置错误不能显示“全部通过”。合法的整批 error 可以保留已经完成的通过/失败结果，但另列“运行错误”并说明整批没通过；格式或完整性不符合要求时，不把不可信的部分结果算通过。原始日志在前、摘要在后；“没有完成验证”与“断言失败”分开表达。
+- 摘要统计明确的 pass、fail、error、skipped；筛选跳过单列文件数，缺图跳过按用例计数，缺少结果单列。前置错误不能显示“全部通过”。合法的整批 error 可以保留已经完成的通过/失败结果，但另列“运行错误”并说明整批没通过；格式或完整性不符合要求时，不把不可信的部分结果算通过。原始日志在前、摘要在后；“没有完成验证”与“断言失败”分开表达。
 - 并发刷新仅应用最新一次收集；停用后迟到的收集不再操作已销毁的面板。
 
 ## 编辑辅助的范围

@@ -633,3 +633,39 @@ test("标准close等待主进程退出后仍未排空的管道", {timeout: 5000}
     assert.deepEqual(result.parsed, {value: "ready"});
     assert.equal(result.stderr, "late-stderr");
 });
+
+test("取消保留已经收到file-result的空选择跳过，不误报协议错误", async (t) => {
+    const {root} = fakeWorkspace(t, null, {
+        hang: true,
+        events: (workspace) => {
+            const result = fixtureResult(workspace, []);
+            result.status = "empty";
+            result.errorCode = "no-tests-matched";
+            result.groups = [];
+            result.files[0].verdict = "skipped";
+            result.files[0].reason = "no-cases-selected";
+            return [{schemaVersion: 1, type: "file-result", file: result.files[0].file, result}];
+        },
+    });
+    let flow: ReturnType<typeof startRunFlow>;
+    flow = startRunFlow(
+        {
+            workspaceRoot: root,
+            nodePath: process.execPath,
+            testFiles: ["tests/test_a.json"],
+            expectedCases: new Map([
+                [
+                    "tests/test_a.json",
+                    [],
+                ],
+            ]),
+        },
+        {onProgress: () => flow.cancel()},
+    );
+    const outcome = await flow.done;
+    assert.equal(outcome.cancelled, true);
+    assert.equal(outcome.errorCode, undefined);
+    assert.equal(outcome.fileResults.get("tests/test_a.json"), "skipped");
+    assert.equal(outcome.counts.get("tests/test_a.json"), 0);
+    assert.equal(outcome.caseResults.size, 0);
+});

@@ -173,8 +173,11 @@ test("缺项文案包含来源与原始下标，不根据图片或组名猜结�
     assert.equal(missingCaseVerdict("tests/a.json", 4).verdict, "error");
 });
 
-test("用例取键统一路径分隔符并保留原始下标", () => {
-    assert.equal(caseKeyOf("tests\\a\\test_a.json", 7), "tests/a/test_a.json#7");
+test("用例取键遵循平台路径规则并保留原始下标", () => {
+    assert.equal(
+        caseKeyOf("tests\\a\\test_a.json", 7),
+        process.platform === "win32" ? "tests/a/test_a.json#7" : "tests\\a\\test_a.json#7",
+    );
 });
 
 test("兜底文案指向测试输出，不根据未知结果猜下载或截图问题", () => {

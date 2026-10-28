@@ -13,7 +13,7 @@ import type {SummaryFile, SummaryInput} from "./core/runSummary";
 import {buildFileNode, collectRunTargets, folderSegments} from "./core/testExplorer";
 import {adaptResultFiles, caseInfoToVerdict} from "./maatools/results";
 import {runTestList, type ListFileEntry} from "./maatools/list";
-import {displayPath, resolveFromWorkspace} from "./maatools/paths";
+import {displayPath, pathKey, resolveFromWorkspace} from "./maatools/paths";
 import type {TestRunEvent} from "./maatools/protocol";
 import {describeCommand, startTestRun} from "./runner";
 import type {RunFlowOutcome, RunRequest} from "./runner";
@@ -266,7 +266,7 @@ export class NodeTestExplorer implements vscode.Disposable {
             dirPath = dirPath ? `${dirPath}/${segment}` : segment;
 
             // 目录节点 id 只由层级路径决定，所以直接在父节点里按 id 找，不用另外记一张表
-            const dirId = `maaNodeTest#dir:${dirPath}`;
+            const dirId = `maaNodeTest#dir:${pathKey(dirPath)}`;
             let dirItem = parent.get(dirId);
             if (!dirItem) {
                 dirItem = this.controller.createTestItem(dirId, segment);
@@ -436,8 +436,8 @@ export class NodeTestExplorer implements vscode.Disposable {
     ): void {
         if (this.disposed) return;
         const file = event.type === "file-result" ? event.file : event.origin.file;
-        const key = displayPath(workspaceRoot, file);
-        const target = targets.find((candidate) => toPosix(candidate.relativePath) === key);
+        const key = pathKey(displayPath(workspaceRoot, file));
+        const target = targets.find((candidate) => pathKey(candidate.relativePath) === key);
         if (!target) return;
         if (event.type === "case-started") {
             const item =
@@ -485,7 +485,7 @@ export class NodeTestExplorer implements vscode.Disposable {
                     verdict,
                     this.casesOfTarget(target, caseVerdicts, state),
                     state,
-                    reasonText(outcome.fileReasons.get(toPosix(target.relativePath)), verdict),
+                    reasonText(outcome.fileReasons.get(pathKey(target.relativePath)), verdict),
                 );
             } else {
                 this.markKnownCases(testRun, target, caseVerdicts, state);
@@ -594,7 +594,7 @@ export class NodeTestExplorer implements vscode.Disposable {
             const verdict = knownVerdict ?? "error";
             const cases = this.casesOfTarget(target, caseVerdicts, state);
             const reason =
-                outcome.fileReasons.get(toPosix(target.relativePath)) ??
+                outcome.fileReasons.get(pathKey(target.relativePath)) ??
                 (knownVerdict === undefined ? (outcome.error ?? outcome.empty) : undefined);
             summaryFiles.push(
                 this.markFileTarget(testRun, target, verdict, cases, state, reasonText(reason, verdict), invalidResult),
@@ -604,7 +604,7 @@ export class NodeTestExplorer implements vscode.Disposable {
         appendRunSummary(testRun, anchor, {
             files: summaryFiles,
             durationMs: duration,
-            error: outcome.error ?? outcome.empty,
+            error: outcome.error,
         });
     }
 
@@ -733,7 +733,7 @@ export class NodeTestExplorer implements vscode.Disposable {
                     verdict: known ? (fileVerdictOf(outcome, target.relativePath) ?? "error") : "error",
                     caseCount: 1,
                     cases: [{caseIndex: target.caseIndex, verdict: info.verdict, title: info.title}],
-                    reason: reason ?? outcome.fileReasons.get(toPosix(target.relativePath)),
+                    reason: reason ?? outcome.fileReasons.get(pathKey(target.relativePath)),
                 },
             ],
             durationMs: duration,
@@ -840,18 +840,24 @@ function buildCaseVerdicts(outcome: Pick<RunFlowOutcome, "caseResults">): Map<st
 
 function reasonText(reason: string | undefined, verdict: FileVerdict = "error"): VerdictText | undefined {
     if (!reason) return undefined;
-    return {title: verdict === "fail" ? "断言失败" : verdict === "pass" ? "通过" : "没有完成验证", detail: [reason]};
+    return {
+        title:
+            verdict === "fail"
+                ? "断言失败"
+                : verdict === "pass"
+                  ? "通过"
+                  : verdict === "skipped"
+                    ? "筛选跳过"
+                    : "没有完成验证",
+        detail: [reason],
+    };
 }
 
 /** 文件键口径：相对路径统一正斜杠，和归位结果的键对齐 */
 function fileVerdictOf(outcome: RunFlowOutcome, relativePath: string): FileVerdict | undefined {
-    return outcome.fileResults.get(toPosix(relativePath));
+    return outcome.fileResults.get(pathKey(relativePath));
 }
 
 function toOutputChunk(chunk: string): string {
     return chunk.replace(/\r?\n/g, "\r\n");
-}
-
-function toPosix(target: string): string {
-    return target.replace(/\\/g, "/");
 }

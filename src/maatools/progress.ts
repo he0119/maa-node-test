@@ -1,6 +1,5 @@
 // 校验实时事件的先后关系并保存完成事实；最终报告必须与已发布的事实一致。
 
-import * as path from "node:path";
 import {isDeepStrictEqual} from "node:util";
 
 import {
@@ -10,13 +9,15 @@ import {
     type ResultDocument,
     type ResultSelection,
     type RunFileCaseResult,
+    type RunCaseResult,
     type RunFileResult,
     type TestRunEvent,
 } from "./protocol";
 import {adaptResultFiles, type CaseInfo} from "./results";
+import {pathKey} from "./paths";
 
 function originKey(origin: CaseOrigin): string {
-    return `${path.normalize(origin.file)}#${origin.case}`;
+    return `${pathKey(origin.file)}#${origin.case}`;
 }
 
 function requireSame(condition: boolean, message: string): void {
@@ -25,7 +26,7 @@ function requireSame(condition: boolean, message: string): void {
 
 function metadata(file: RunFileResult) {
     return {
-        file: path.normalize(file.file),
+        file: pathKey(file.file),
         name: file.name,
         error: file.error,
         controllers: file.controllers,
@@ -33,14 +34,27 @@ function metadata(file: RunFileResult) {
     };
 }
 
-/** 平台结果的返回顺序不影响事实；原始用例下标、检查明细和执行耗时必须相同。 */
+/** 只规范明确的路径字段；用例名、断言明细等内容仍须完全相同。 */
+function platformFacts(result: RunCaseResult) {
+    return {
+        ...result,
+        imagePath: pathKey(result.imagePath),
+        ...(result.origin ? {origin: {...result.origin, file: pathKey(result.origin.file)}} : {}),
+    };
+}
+
 function sameCase(left: RunFileCaseResult, right: RunFileCaseResult): boolean {
     const {platforms: leftPlatforms, ...leftCase} = left;
     const {platforms: rightPlatforms, ...rightCase} = right;
     if (!isDeepStrictEqual(leftCase, rightCase) || leftPlatforms.length !== rightPlatforms.length) return false;
     const remaining = [...rightPlatforms];
     for (const platform of leftPlatforms) {
-        const index = remaining.findIndex((item) => isDeepStrictEqual(item, platform));
+        const index = remaining.findIndex((item) =>
+            isDeepStrictEqual(
+                {...item, result: platformFacts(item.result)},
+                {...platform, result: platformFacts(platform.result)},
+            ),
+        );
         if (index < 0) return false;
         remaining.splice(index, 1);
     }
@@ -81,14 +95,14 @@ export class RunProgress {
             const key = originKey(event.origin);
             if (this.started.has(key)) return null;
             requireSame(
-                !this.completedCases.has(key) && !this.completedFiles.has(path.normalize(event.origin.file)),
+                !this.completedCases.has(key) && !this.completedFiles.has(pathKey(event.origin.file)),
                 `已经完成的用例又收到开始消息：${key}`,
             );
             this.started.set(key, event.origin);
             return structuredClone(event);
         }
         const file = event.result.files[0];
-        const filePath = path.normalize(file.file);
+        const filePath = pathKey(file.file);
         const previousMetadata = this.fileMetadata.get(filePath);
         requireSame(
             !previousMetadata || isDeepStrictEqual(previousMetadata, metadata(file)),
@@ -114,7 +128,7 @@ export class RunProgress {
                 return null;
             }
             for (const origin of this.started.values()) {
-                if (path.normalize(origin.file) === filePath)
+                if (pathKey(origin.file) === filePath)
                     requireSame(
                         file.selectedCases.includes(origin.case),
                         `文件结果遗漏已经开始的用例：${originKey(origin)}`,
@@ -132,7 +146,7 @@ export class RunProgress {
                 key,
                 completedCase,
             ] of this.completedCases) {
-                if (path.normalize(completedCase.origin.file) === filePath)
+                if (pathKey(completedCase.origin.file) === filePath)
                     requireSame(
                         file.selectedCases.includes(completedCase.origin.case),
                         `文件结果遗漏已完成用例：${key}`,
@@ -162,13 +176,13 @@ export class RunProgress {
     checkFinal(result: ResultDocument): void {
         const files = new Map(
             result.files.map((file) => [
-                path.normalize(file.file),
+                pathKey(file.file),
                 file,
             ]),
         );
         for (const origin of this.started.values()) {
             requireSame(
-                files.get(path.normalize(origin.file))?.selectedCases.includes(origin.case) === true,
+                files.get(pathKey(origin.file))?.selectedCases.includes(origin.case) === true,
                 `最终报告遗漏已经开始的用例：${originKey(origin)}`,
             );
         }
@@ -187,7 +201,7 @@ export class RunProgress {
             completed,
         ] of this.completedCases) {
             const matching = files
-                .get(path.normalize(completed.origin.file))
+                .get(pathKey(completed.origin.file))
                 ?.cases.find((item) => item.index === completed.origin.case);
             requireSame(
                 matching !== undefined && sameCase(completed.result, matching),

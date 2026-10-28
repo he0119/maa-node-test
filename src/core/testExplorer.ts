@@ -4,6 +4,8 @@
  * 不 import vscode，实际 TestItem 由 src/testing.ts 创建。
  */
 
+import {pathKey, toPosix} from "../maatools/paths";
+
 /** 收集结果里的一条用例（面板要用的字段） */
 export interface CollectedCase {
     index: number;
@@ -59,12 +61,12 @@ export interface FileNodeDescriptor {
 
 /** 文件级节点 id：绝对路径 + `#file` */
 export function fileNodeId(filePath: string): string {
-    return `${filePath}${FILE_NODE_SUFFIX}`;
+    return `${pathKey(filePath)}${FILE_NODE_SUFFIX}`;
 }
 
 /** 用例节点 id：绝对路径 + `#case-<下标>` */
 export function caseNodeId(filePath: string, caseIndex: number): string {
-    return `${filePath}${CASE_NODE_SUFFIX}${caseIndex}`;
+    return `${pathKey(filePath)}${CASE_NODE_SUFFIX}${caseIndex}`;
 }
 
 /**
@@ -133,9 +135,7 @@ export function buildFileNode(entry: CollectedFile, filePath: string): FileNodeD
 }
 
 /** 相对路径统一用正斜杠显示，Windows 上也不会出现反斜杠 */
-export function toPosix(target: string): string {
-    return target.replace(/\\/g, "/");
-}
+export {toPosix};
 
 /** 相对路径里的文件名部分 */
 export function fileNameOf(relativePath: string): string {
@@ -154,7 +154,7 @@ export function folderSegments(relativePath: string): string[] {
         .split("/")
         .filter((segment) => segment.length > 0);
     segments.pop();
-    if (segments[0] === "tests") segments.shift();
+    if (pathKey(segments[0] ?? "") === pathKey("tests")) segments.shift();
     return segments;
 }
 
@@ -195,7 +195,7 @@ export function collectRunTargets<Item extends TestTreeItem<Item>, Leaf extends 
             ]) => child,
         );
         if (leaf && !children.some(isExcluded)) {
-            fileTargets.set(leaf.filePath, {...leaf, item});
+            fileTargets.set(pathKey(leaf.filePath), {...leaf, item});
             return;
         }
         for (const child of children) visit(child);
@@ -203,7 +203,7 @@ export function collectRunTargets<Item extends TestTreeItem<Item>, Leaf extends 
     for (const item of included) visit(item);
     return [
         ...fileTargets.values(),
-        ...[...caseTargets.values()].filter((target) => !fileTargets.has(target.filePath)),
+        ...[...caseTargets.values()].filter((target) => !fileTargets.has(pathKey(target.filePath))),
     ];
 }
 

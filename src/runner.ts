@@ -176,9 +176,14 @@ export class NodeTestRunner implements vscode.Disposable {
             return;
         }
 
-        if (skippedCases > 0) {
+        const skippedFiles = [...outcome.fileResults.values()].filter((verdict) => verdict === "skipped").length;
+        if (skippedCases > 0 || skippedFiles > 0) {
+            const notes = [
+                ...(skippedFiles > 0 ? [`${skippedFiles} 个文件本次筛选未选择用例`] : []),
+                ...(skippedCases > 0 ? [`${skippedCases} 条用例因截图缺失被跳过、没有验证`] : []),
+            ];
             const action = await vscode.window.showWarningMessage(
-                `节点测试通过，但 ${skippedCases} 条用例因截图缺失被跳过、没有验证：${title}`,
+                `节点测试通过；${notes.join("；")}：${title}`,
                 "查看输出",
             );
             if (action === "查看输出") this.output.show();

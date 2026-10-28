@@ -1,10 +1,9 @@
 // maa-tools 机器输出的本地描述与运行时检查；测试来源和结论由上游提供。
 
-import * as path from "node:path";
 import {isDeepStrictEqual} from "node:util";
 
 import type {CaseOutcome, FileVerdict} from "../core/testResult";
-import {resolveFromWorkspace} from "./paths";
+import {isAbsolutePath, pathKey, resolveFromWorkspace, samePath} from "./paths";
 
 export interface ListCase {
     index: number;
@@ -146,7 +145,7 @@ function index(value: unknown, at: string): asserts value is number {
 
 function absoluteFile(value: unknown, at: string): asserts value is string {
     text(value, at);
-    requireValue(path.isAbsolute(value), `${at} 必须是绝对路径`);
+    requireValue(isAbsolutePath(value), `${at} 必须是绝对路径`);
 }
 
 function verdict(value: unknown, at: string, allowSkipped = true): void {
@@ -197,7 +196,7 @@ function documentHeader(value: unknown): asserts value is Record<string, unknown
     const files = new Set<string>();
     value.files.forEach((file, i) => {
         fileMetadata(file, `files[${i}]`);
-        const key = path.normalize((file as ListFileEntry).file);
+        const key = pathKey((file as ListFileEntry).file);
         requireValue(!files.has(key), `重复返回测试文件 ${key}`);
         files.add(key);
     });
@@ -275,7 +274,7 @@ function checkAggregate(aggregate: CaseOutcome, children: readonly CaseOutcome[]
 function sameResult(left: RunCaseResult, right: RunCaseResult): boolean {
     return (
         left.image === right.image &&
-        left.imagePath === right.imagePath &&
+        samePath(left.imagePath, right.imagePath) &&
         left.verdict === right.verdict &&
         left.durationMs === right.durationMs &&
         left.error === right.error &&
@@ -325,7 +324,7 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
     value.files.forEach((file, i) => {
         const at = `files[${i}]`;
         const item = file as unknown as RunFileResult;
-        verdict(item.verdict, `${at}.verdict`, false);
+        verdict(item.verdict, `${at}.verdict`);
         optionalText(item.reason, `${at}.reason`);
         array(item.selectedCases, `${at}.selectedCases`);
         item.selectedCases.forEach((caseIndex, j) => index(caseIndex, `${at}.selectedCases[${j}]`));
@@ -340,6 +339,15 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
             ),
             `${at}.cases 未完整覆盖 selectedCases`,
         );
+        if (item.verdict === "skipped") {
+            requireValue(
+                !item.error &&
+                    item.reason === "no-cases-selected" &&
+                    item.cases.length === 0 &&
+                    item.selectedCases.length === 0,
+                `${at} 文件跳过必须无文件错误、无所选用例，并提供 no-cases-selected 原因`,
+            );
+        }
         item.cases.forEach((testCase, j) => {
             const location = `${at}.cases[${j}]`;
             verdict(testCase.verdict, `${location}.verdict`);
@@ -354,9 +362,7 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
                 runCase(platform.result, `${platformAt}.result`);
                 const origin = platform.result.origin;
                 requireValue(
-                    origin &&
-                        path.normalize(origin.file) === path.normalize(item.file) &&
-                        origin.case === testCase.index,
+                    origin && pathKey(origin.file) === pathKey(item.file) && origin.case === testCase.index,
                     `${platformAt} 缺少或使用了错误的用例来源`,
                 );
                 requireValue(platform.result.image === testCase.image, `${platformAt} 截图与文件元数据不一致`);
@@ -385,11 +391,14 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
     const groupVerdicts = result.groups.map((group) => group.verdict);
     if (result.status === "passed") {
         requireValue(
-            fileVerdicts.every((item) => item === "pass") &&
+            fileVerdicts.every((item) => item === "pass" || item === "skipped") &&
                 !groupVerdicts.some((item) => item === "fail" || item === "error"),
             "顶层 passed 与文件或组结论矛盾",
         );
-        requireValue(result.files.length > 0 || groupVerdicts.includes("pass"), "顶层 passed 却没有验证结果");
+        requireValue(
+            fileVerdicts.includes("pass") || groupVerdicts.includes("pass"),
+            "顶层 passed 却没有实际验证通过的结果",
+        );
     }
     if (result.status === "failed") {
         requireValue(
@@ -401,7 +410,8 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
     if (result.status === "empty") {
         requireValue(result.errorCode === "no-tests-matched", "empty 必须提供 no-tests-matched 错误代码");
         requireValue(
-            !result.groups.some((group) => group.cases.length > 0) && fileVerdicts.every((item) => item === "error"),
+            !result.groups.some((group) => group.cases.length > 0) &&
+                fileVerdicts.every((item) => item === "error" || item === "skipped"),
             "empty 却包含已运行的测试结果",
         );
     }
@@ -411,10 +421,12 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
         return result;
     }
 
-    const requested = new Set(selection.testFiles.map((file) => resolveFromWorkspace(selection.workspaceRoot, file)));
+    const requested = new Set(
+        selection.testFiles.map((file) => pathKey(resolveFromWorkspace(selection.workspaceRoot, file))),
+    );
     const returned = new Map(
         result.files.map((file) => [
-            path.normalize(file.file),
+            pathKey(file.file),
             file,
         ]),
     );
@@ -430,7 +442,7 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
                 key,
                 indices,
             ] of selection.expectedCases) {
-                if (resolveFromWorkspace(selection.workspaceRoot, key) === filePath) expected = [...indices];
+                if (pathKey(resolveFromWorkspace(selection.workspaceRoot, key)) === filePath) expected = [...indices];
             }
         }
         const actual = file.cases.map((testCase) => testCase.index).sort((a, b) => a - b);
@@ -453,7 +465,9 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
                         !used.has(i) &&
                         group.controller === platform.controller &&
                         group.resource === platform.resource &&
-                        actual.origin?.file === platform.result.origin?.file &&
+                        actual.origin !== undefined &&
+                        platform.result.origin !== undefined &&
+                        samePath(actual.origin.file, platform.result.origin.file) &&
                         actual.origin?.case === testCase.index &&
                         sameResult(actual, platform.result),
                 );
@@ -494,9 +508,9 @@ export function validateTestRunEvent(value: unknown, selection: ResultSelection)
         file = value.origin.file;
         caseIndex = value.origin.case;
     }
-    const filePath = path.normalize(file);
+    const filePath = pathKey(file);
     requireValue(
-        selection.testFiles.some((item) => resolveFromWorkspace(selection.workspaceRoot, item) === filePath),
+        selection.testFiles.some((item) => pathKey(resolveFromWorkspace(selection.workspaceRoot, item)) === filePath),
         `进度消息包含未请求的测试文件 ${file}`,
     );
     let expected: readonly number[] | undefined = selection.caseIndex != null ? [selection.caseIndex] : undefined;
@@ -505,7 +519,7 @@ export function validateTestRunEvent(value: unknown, selection: ResultSelection)
             key,
             indices,
         ] of selection.expectedCases) {
-            if (resolveFromWorkspace(selection.workspaceRoot, key) === filePath) expected = indices;
+            if (pathKey(resolveFromWorkspace(selection.workspaceRoot, key)) === filePath) expected = indices;
         }
     }
     if (caseIndex !== undefined && expected)
@@ -526,7 +540,7 @@ export function validateTestRunEvent(value: unknown, selection: ResultSelection)
         });
         // 全局启动错误可以没有 files，但逐项完成事件必须明确包含对应文件。
         requireValue(
-            result.files.length === 1 && path.normalize(result.files[0].file) === filePath,
+            result.files.length === 1 && pathKey(result.files[0].file) === filePath,
             "进度结果快照必须包含对应的单个文件",
         );
     }

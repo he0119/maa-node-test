@@ -2,7 +2,6 @@
 // 这里检查协议完整性、转发日志，并提供取消；不读取测试文件重判是否合法。
 
 import {spawn} from "node:child_process";
-import * as path from "node:path";
 
 import {DEFAULT_CONFIG, buildMaaToolsArgs} from "../core/runnerArgs";
 import type {FileVerdict} from "../core/testResult";
@@ -100,7 +99,7 @@ export function startRunFlow(request: RunFlowRequest, handlers: RunFlowHandlers 
     };
     let cancelled = false;
     let currentChild: ReturnType<typeof spawn> | null = null;
-    const workspace = path.resolve(request.workspaceRoot);
+    const workspace = resolveFromWorkspace(request.workspaceRoot, ".");
     const progress = new RunProgress({...request, workspaceRoot: workspace});
     const cancel = () => {
         cancelled = true;

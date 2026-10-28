@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import {readNodeTestConfig, resolveNodeTestWorkspace} from "./config";
 import {isTestFilePath} from "./core/document";
 import {runTestList, type ListCase} from "./maatools/list";
+import {samePath} from "./maatools/paths";
 import {RUN_CASE_COMMAND, RUN_FILE_COMMAND} from "./core/lens";
 import {NodeTestCodeLensProvider, TEST_FILE_SELECTOR} from "./providers/codeLens";
 import {resolveControllerDir} from "./core/loaderMaps";
@@ -178,7 +179,7 @@ async function runOneCase(uriArgument: unknown, caseIndexArgument: unknown): Pro
         configPath: config.configPath,
         files: [target.relativePath],
     });
-    const file = doc?.files.find((entry) => entry.file === target.relativePath);
+    const file = doc?.files.find((entry) => samePath(entry.file, target.relativePath));
     if (!file || file.error || file.cases.length === 0) {
         await vscode.window.showWarningMessage(
             `没有可选择的用例：${file?.error ?? (stderr || "maa-tools 没有返回该文件的用例")}`,

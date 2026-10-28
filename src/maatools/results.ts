@@ -1,7 +1,7 @@
 // 把 maa-tools 已汇总的文件、用例结论转为显示数据；不在扩展中重判测试。
 
-import {type CaseOutcome, type CaseVerdict, type FileVerdict} from "../core/testResult";
-import {displayPath} from "./paths";
+import {caseKeyOf, type CaseOutcome, type CaseVerdict, type FileVerdict} from "../core/testResult";
+import {displayPath, pathKey} from "./paths";
 import type {CaseCheck, ResultDocument, RunFileResult} from "./protocol";
 
 export type {CaseCheck, CaseOrigin, RunCaseResult, RunFileCaseResult, RunFileResult, RunGroupResult} from "./protocol";
@@ -73,6 +73,7 @@ export function describeCheck(check: Partial<CaseCheck>): {node: string; reason:
 /** 已知原因代码转为中文；未知的说明原样保留，方便排错。 */
 export function describeResultReason(reason: string): string {
     const known: Record<string, string> = {
+        "no-cases-selected": "本次筛选未选择用例",
         "missing-image": "部分或全部平台缺少截图，未完成全部验证",
         "some-platforms-skipped": "已有平台完成验证，其余平台因缺图跳过",
         "no-result": "识别或执行没有返回完整结果，未完成验证",
@@ -116,10 +117,10 @@ export function adaptResultFiles(
             reason: metadata.reason ? describeResultReason(metadata.reason) : undefined,
             error: metadata.error ? describeResultReason(metadata.error) : undefined,
         });
-        fileResults.set(key, file.verdict);
-        counts.set(key, file.selectedCases.length);
+        fileResults.set(pathKey(key), file.verdict);
+        counts.set(pathKey(key), file.selectedCases.length);
         const reason = file.reason ?? file.error;
-        if (reason) fileReasons.set(key, describeResultReason(reason));
+        if (reason) fileReasons.set(pathKey(key), describeResultReason(reason));
         for (const testCase of file.cases) {
             const info: CaseInfo = {
                 verdict: testCase.verdict,
@@ -155,7 +156,7 @@ export function adaptResultFiles(
                     }
                 }
             }
-            caseResults.set(`${key}#${testCase.index}`, info);
+            caseResults.set(caseKeyOf(key, testCase.index), info);
         }
     }
     return {entries, caseResults, fileResults, counts, fileReasons};
@@ -213,6 +214,7 @@ export function summarizePlatforms(entries: readonly FileEntry[]): {
     const platforms: {label: string; controller: string; file: string; images: number; missing: number}[] = [];
     const unmatched: {controller: string; file: string}[] = [];
     for (const entry of entries) {
+        if (entry.verdict === "skipped") continue;
         const byPlatform = new Map<
             string,
             {label: string; controller: string; file: string; images: number; missing: number}
@@ -248,5 +250,5 @@ export function overallVerdict(fileResults: ReadonlyMap<string, FileVerdict>): "
     if (verdicts.length === 0) return "empty";
     if (verdicts.includes("error")) return "error";
     if (verdicts.includes("fail")) return "fail";
-    return "pass";
+    return verdicts.includes("pass") ? "pass" : "empty";
 }
