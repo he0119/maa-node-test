@@ -73,7 +73,7 @@ jobs:
       - name: 类型检查
         run: pnpm run check
 
-      - name: 单测（扩展纯函数 + runner）
+      - name: 单测（纯函数）
         run: pnpm run test:all
 
       # 自己打 VSIX（顺带触发 vscode:prepublish → 编译 + esbuild 打包），

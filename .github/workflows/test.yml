@@ -31,7 +31,7 @@ jobs:
       - name: 类型检查
         run: pnpm run check
 
-      - name: 单测（扩展纯函数 + runner）
+      - name: 单测（纯函数）
         run: pnpm run test:all
 
       # 打包本身也是一项检查：.vscodeignore 写错、dist/ 没生成都会在这里暴露

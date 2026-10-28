@@ -1,8 +1,8 @@
-import assert from "node:assert/strict";
-import path from "node:path";
+import {strict as assert} from "node:assert";
+import * as path from "node:path";
 import {test} from "node:test";
 
-import {displayPath, resolveFromWorkspace, toPosix} from "./paths.mjs";
+import {displayPath, resolveFromWorkspace, toPosix} from "./paths";
 
 const workspace = path.join(path.sep, "repo");
 

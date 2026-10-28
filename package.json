@@ -47,11 +47,6 @@
                 "title": "运行当前测试用例"
             },
             {
-                "command": "maaNodeTest.showPlan",
-                "category": "Maa 节点测试",
-                "title": "查看当前测试文件的运行计划（不实际执行）"
-            },
-            {
                 "command": "maaNodeTest.refreshTests",
                 "category": "Maa 节点测试",
                 "title": "刷新测试面板"
@@ -95,9 +90,8 @@
         "watch": "tsc -p . --watch",
         "bundle": "node scripts/bundle.mjs",
         "build": "pnpm run compile && pnpm run bundle",
-        "test": "node --test \"out/core/*.test.js\"",
-        "test:runner": "node --test \"runner/lib/*.test.mjs\"",
-        "test:all": "pnpm run build && pnpm test && pnpm run test:runner",
+        "test": "node --test \"out/core/*.test.js\" \"out/maatools/*.test.js\"",
+        "test:all": "pnpm run build && pnpm test",
         "vscode:prepublish": "pnpm run build",
         "package": "vsce package --out dist",
         "watch:bundle": "node scripts/bundle.mjs --watch"

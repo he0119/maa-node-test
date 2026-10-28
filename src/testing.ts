@@ -1,61 +1,42 @@
-import * as path from "node:path";
 import * as vscode from "vscode";
 import {readNodeTestConfig, resolveNodeTestWorkspace} from "./config";
 import type {NodeTestWorkspace} from "./config";
-import {isTestFilePath, parseTestDocument} from "./core/document";
+import {parseTestDocument} from "./core/document";
 import {collectMissingImages, describeMissingImage, summarizeMissingImage} from "./core/missingImages";
 import type {MissingImageWarning} from "./core/missingImages";
 import {locateImage} from "./core/testset";
 import {buildBatchRunTitle, buildRunTitle} from "./core/runnerArgs";
-import {
-    buildMessageMarkdown,
-    planFileMarking,
-    caseKeyOf,
-    collectCaseVerdict,
-    collectFileVerdict,
-    describeVerdict,
-    fallbackVerdict,
-    verdictFromExitCode,
-} from "./core/testResult";
-import type {CaseOutcome, CaseVerdict, FileVerdict} from "./core/testResult";
+import {buildMessageMarkdown, planFileMarking, caseKeyOf, missingCaseVerdict} from "./core/testResult";
+import type {CaseOutcome, CaseVerdict, FileVerdict, VerdictText} from "./core/testResult";
 import {buildRunSummary} from "./core/runSummary";
-import type {SummaryCase, SummaryFile} from "./core/runSummary";
-import {buildFileNode, folderSegments} from "./core/testExplorer";
-import {describeCommand, startTestProcess} from "./runner";
-import type {RunRequest} from "./runner";
+import type {SummaryFile, SummaryInput} from "./core/runSummary";
+import {buildFileNode, collectRunTargets, folderSegments} from "./core/testExplorer";
+import {adaptResultFiles, caseInfoToVerdict} from "./maatools/results";
+import {runTestList, type ListFileEntry} from "./maatools/list";
+import {displayPath, resolveFromWorkspace} from "./maatools/paths";
+import type {TestRunEvent} from "./maatools/protocol";
+import {describeCommand, startTestRun} from "./runner";
+import type {RunFlowOutcome, RunRequest} from "./runner";
 
 /**
- * 把节点测试挂到 VS Code 的测试面板（Test Explorer）上：
- *   - 发现：扫 tests 目录下所有 test_*.json，按目录分组，每个文件一个节点、每个用例一个子节点；
- *   - 运行：点目录节点跑它下面所有文件，点文件节点跑整个文件，点用例节点只跑这一条；
- *   - 结果：逐文件结论翻译成通过 / 失败 / 未能运行。
- *
- * 两个关键取舍：
- *
- * 1. **多个文件合成一次进程**。MaaFW 初始化 + assets 加载是单次运行的固定大头（实测单文件 4~5 秒，
- *    真正的识别只占一小部分），一个文件一个进程等于把这份开销重复几十次。合成一批之后，runner 会为
- *    每个文件打印一行 `RESULT-FILE: <相对路径> pass|fail|error`，面板按它逐文件标记。
- * 2. **单条用例仍然各自一个进程**。runner 一次调用只回答整批的结果，说不出具体哪条用例失败；
- *    点单条用例时用独立进程，退出码就是这一条的结果，精确定位才有保障。
+ * 测试面板：调用 maa-tools 收集测试，按目录、文件、用例建树，再显示结构化运行结果。
+ * 无排除项的文件合成一次运行；排除了部分用例的文件只运行剩余用例。
+ * 识别结论由 maa-tools 提供，面板只检查所选用例是否都有结果。
  */
 
 /** 命令面板里的「刷新测试面板」。测试面板自己也有刷新按钮，这个命令方便用快捷键触发 */
 export const REFRESH_TESTS_COMMAND = "maaNodeTest.refreshTests";
 
-/** 测试文件的两条 glob：json 和 jsonc 各查一次，比花括号 glob 兼容性稳 */
-const TEST_FILE_GLOBS = [
-    "**/tests/**/test_*.json",
-    "**/tests/**/test_*.jsonc",
-];
-
-/** 叶子节点（文件或用例）的元信息。面板运行时靠它把节点还原成 runner 参数 */
+/** 文件或用例节点的运行信息。 */
 interface LeafInfo {
     /** 测试文件绝对路径 */
     filePath: string;
-    /** 相对工作区根的路径，斜杠分隔 */
+    /** 显示路径：仓库内为相对路径，仓库外保留绝对路径。 */
     relativePath: string;
     /** 有值表示这是某一条用例的节点 */
     caseIndex?: number;
+    /** 收集失败的文件单独报错，不阻止其它文件运行。 */
+    collectionError?: string;
 }
 
 interface RunTarget extends LeafInfo {
@@ -70,12 +51,23 @@ interface TargetCase {
     caseIndex?: number;
 }
 
-/** 扫描到的测试文件，解析结果在建树时复用，避免重复读盘 */
+/** 一次运行保存自己的节点和状态，不受运行期间刷新面板影响。 */
+interface RunState {
+    casesByTarget: Map<string, readonly TargetCase[]>;
+    started: Set<string>;
+    completed: Set<string>;
+}
+
+/** 收集到的测试文件：树以 maa-tools 的收集结果为准；本地解析只为缺图诊断 */
 interface TestFileEntry {
     uri: vscode.Uri;
-    document: vscode.TextDocument;
-    parsed: ReturnType<typeof parseTestDocument>;
+    /** 已由收集适配层归一化的显示路径。 */
     relativePath: string;
+    /** maa-tools test --list --json 的收集结果 */
+    collected: ListFileEntry;
+    /** 以下两项只服务缺图诊断（画黄线要 image 值的精确偏移）；文件读不了或解析失败就没有 */
+    document?: vscode.TextDocument;
+    parsed?: ReturnType<typeof parseTestDocument>;
 }
 
 export class NodeTestExplorer implements vscode.Disposable {
@@ -84,7 +76,9 @@ export class NodeTestExplorer implements vscode.Disposable {
     /** 节点 id → 叶子信息。运行时只认这张表，不再靠解析 id 字符串 */
     private readonly leaves = new Map<string, LeafInfo>();
     private refreshTimer: NodeJS.Timeout | undefined;
-    /** 插件已经销毁：迟到的事件（文件监听、300ms 防抖）不能再碰 vscode 对象，碰了会抛「已销毁」 */
+    /** 只有最新一次收集能更新面板，避免慢的旧请求覆盖新结果。 */
+    private refreshSequence = 0;
+    /** 插件销毁后，迟到的收集结果不再访问 VS Code 对象。 */
     private disposed = false;
     /** 串行执行：一次测试运行里的多个批次/目标逐个跑，避免同时起一堆 MaaFW 进程 */
     private queue: Promise<void> = Promise.resolve();
@@ -92,7 +86,6 @@ export class NodeTestExplorer implements vscode.Disposable {
     private readonly diagnostics = vscode.languages.createDiagnosticCollection("maaNodeTest");
 
     constructor(
-        private readonly extensionPath: string,
         /** controller 显示名 → 截图目录名（loader 的别名映射）；不传就按同名处理 */
         private readonly resolveController: (controller: string) => string = (controller) => controller,
         /** 发现测试文件后，把它们的控制器组合交出去（用于后台预热节点索引） */
@@ -127,6 +120,7 @@ export class NodeTestExplorer implements vscode.Disposable {
 
     dispose(): void {
         this.disposed = true;
+        this.refreshSequence++;
         if (this.refreshTimer) clearTimeout(this.refreshTimer);
         this.refreshTimer = undefined;
         this.diagnostics.dispose();
@@ -134,11 +128,13 @@ export class NodeTestExplorer implements vscode.Disposable {
         this.controller.dispose();
     }
 
-    /** 重新扫描所有测试文件。清空后重建，保证和磁盘一致 */
+    /** 按当前配置重新收集测试并重建面板，只应用最新一次收集结果。 */
     async refresh(): Promise<void> {
         if (this.disposed) return;
+        const sequence = ++this.refreshSequence;
         this.controller.items.replace([]);
         this.leaves.clear();
+        this.diagnostics.clear();
 
         const workspaceRoot = resolveNodeTestWorkspace()?.workspaceRoot;
         if (!workspaceRoot) {
@@ -146,9 +142,8 @@ export class NodeTestExplorer implements vscode.Disposable {
             return;
         }
 
-        const entries = await this.collectTestFiles(workspaceRoot);
-        // 扫盘期间插件被销毁（窗口关掉、扩展停用）就别接着往下建树了
-        if (this.disposed) return;
+        const entries = await this.collectTestFiles(workspaceRoot, sequence);
+        if (!this.isCurrentRefresh(sequence)) return;
         // 按路径排序，目录和文件的顺序才稳定（VS Code 不会帮我们排）
         entries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 
@@ -157,57 +152,58 @@ export class NodeTestExplorer implements vscode.Disposable {
         for (const entry of entries) this.addTestFile(entry, missing.get(entry.relativePath));
 
         // 顺手把这些文件声明的控制器组合交出去，让后台预热节点索引（不然第一次补全要等 350ms）
-        this.onScopesDiscovered(entries.map((entry) => entry.parsed.configs.controller));
-    }
-
-    /** 扫出所有测试文件并解析；坏掉的 JSON 跳过并留一句警告，不影响整个面板 */
-    private async collectTestFiles(workspaceRoot: string): Promise<TestFileEntry[]> {
-        const entries: TestFileEntry[] = [];
-        const seen = new Set<string>();
-
-        for (const glob of TEST_FILE_GLOBS) {
-            let uris: vscode.Uri[];
-            try {
-                uris = await vscode.workspace.findFiles(glob, "**/node_modules/**");
-            } catch (error) {
-                console.warn(`[maa-node-test] 扫描测试文件失败（${glob}）：${String(error)}`);
-                continue;
-            }
-
-            for (const uri of uris) {
-                if (uri.scheme !== "file" || seen.has(uri.fsPath)) continue;
-                seen.add(uri.fsPath);
-
-                const relativePath = toPosix(path.relative(workspaceRoot, uri.fsPath));
-                if (!isTestFilePath(relativePath)) continue;
-
-                let document: vscode.TextDocument;
-                try {
-                    document = await vscode.workspace.openTextDocument(uri);
-                } catch (error) {
-                    console.warn(`[maa-node-test] 打不开 ${relativePath}：${String(error)}`);
-                    continue;
-                }
-
-                const parsed = parseTestDocument(document.getText());
-                if (parsed.problems.length > 0) {
-                    console.warn(`[maa-node-test] ${relativePath} 的 JSON 有语法错误，先跳过不显示`);
-                    continue;
-                }
-
-                entries.push({uri, document, parsed, relativePath});
-            }
-        }
-
-        return entries;
+        this.onScopesDiscovered(entries.map((entry) => entry.collected.controllers));
     }
 
     /**
-     * 探测阶段检查每个文件的截图是否齐全，并把结果画成诊断 + 返回给建树用。
-     *
-     * 为什么要在这儿做：`maa-tools` 遇到缺图只打印跳过、跳过即通过，等跑完看到的是绿的；
-     * 写用例的时候在 image 值下面画一条黄线，比跑完再猜有效得多。
+     * 发现测试时调用 maa-tools test --list --json，并传入与运行相同的配置路径。
+     * 本地解析只为编辑时的缺图提示，不决定能运行哪些测试。
      */
+    private async collectTestFiles(workspaceRoot: string, sequence: number): Promise<TestFileEntry[]> {
+        const config = readNodeTestConfig();
+        const {doc, stderr} = await runTestList({
+            workspaceRoot,
+            nodePath: config.nodePath,
+            configPath: config.configPath,
+        });
+        if (!this.isCurrentRefresh(sequence)) return [];
+        if (!doc) {
+            console.warn(`[maa-node-test] 测试收集失败：${stderr}`);
+            const firstLine = stderr.trim().split(/\r?\n/, 1)[0] || "maa-tools 未提供错误说明";
+            const reason = firstLine.length > 200 ? `${firstLine.slice(0, 200)}…` : firstLine;
+            void vscode.window.showWarningMessage(
+                `节点测试收集失败：${reason}。请检查 maaNodeTest.configPath 和被测仓库的依赖。`,
+            );
+            return [];
+        }
+
+        const entries: TestFileEntry[] = [];
+        for (const file of doc.files) {
+            if (!this.isCurrentRefresh(sequence)) return [];
+            const entry: TestFileEntry = {
+                uri: vscode.Uri.file(resolveFromWorkspace(workspaceRoot, file.file)),
+                relativePath: file.file,
+                collected: file,
+            };
+            if (!file.error) {
+                try {
+                    const document = await vscode.workspace.openTextDocument(entry.uri);
+                    if (!this.isCurrentRefresh(sequence)) return [];
+                    const parsed = parseTestDocument(document.getText());
+                    if (parsed.problems.length === 0) {
+                        entry.document = document;
+                        entry.parsed = parsed;
+                    }
+                } catch (error) {
+                    console.warn(`[maa-node-test] 打不开 ${file.file}：${String(error)}`);
+                }
+            }
+            entries.push(entry);
+        }
+        return entries;
+    }
+
+    /** 编辑时按 testsetDir 目录约定检查缺图，提前提示；实际运行路径以 maa-tools 结果为准。 */
     private reportMissingImages(entries: readonly TestFileEntry[]): Map<string, MissingImageWarning[]> {
         this.diagnostics.clear();
         const byFile = new Map<string, MissingImageWarning[]>();
@@ -226,9 +222,11 @@ export class NodeTestExplorer implements vscode.Disposable {
         };
 
         for (const entry of entries) {
+            if (!entry.parsed || !entry.document) continue;
+            const {parsed, document} = entry;
             const warnings = collectMissingImages({
-                cases: entry.parsed.cases,
-                controllers: entry.parsed.configs.controller,
+                cases: parsed.cases,
+                controllers: parsed.configs.controller,
                 locate,
                 resolvePlatform: this.resolveController,
             });
@@ -241,8 +239,8 @@ export class NodeTestExplorer implements vscode.Disposable {
                     (warning) =>
                         new vscode.Diagnostic(
                             new vscode.Range(
-                                entry.document.positionAt(warning.offset),
-                                entry.document.positionAt(warning.offset + warning.length),
+                                document.positionAt(warning.offset),
+                                document.positionAt(warning.offset + warning.length),
                             ),
                             describeMissingImage(warning),
                             vscode.DiagnosticSeverity.Warning,
@@ -278,17 +276,24 @@ export class NodeTestExplorer implements vscode.Disposable {
             parent = dirItem.children;
         }
 
-        const fileNode = buildFileNode(entry.parsed, entry.uri.fsPath, entry.relativePath);
+        const fileNode = buildFileNode(entry.collected, entry.uri.fsPath);
+        // 收集结果的偏移要靠 TextDocument 映射成行列；打不开文档就退化成文件开头
+        const toRange = (start: number, end: number) =>
+            entry.document
+                ? new vscode.Range(entry.document.positionAt(start), entry.document.positionAt(end))
+                : new vscode.Range(0, 0, 0, 0);
         const fileItem = this.controller.createTestItem(fileNode.id, fileNode.label, entry.uri);
         fileItem.description = missingImages?.length
             ? `${fileNode.description} · ${missingImages.length} 条用例缺图`
             : fileNode.description;
-        fileItem.range = new vscode.Range(
-            entry.document.positionAt(fileNode.start),
-            entry.document.positionAt(fileNode.end),
-        );
+        fileItem.range = toRange(fileNode.start, fileNode.end);
         fileItem.canResolveChildren = false;
-        this.leaves.set(fileItem.id, {filePath: entry.uri.fsPath, relativePath: entry.relativePath});
+        fileItem.error = fileNode.error;
+        this.leaves.set(fileItem.id, {
+            filePath: entry.uri.fsPath,
+            relativePath: entry.relativePath,
+            collectionError: fileNode.error,
+        });
 
         for (const caseNode of fileNode.cases) {
             const caseItem = this.controller.createTestItem(caseNode.id, caseNode.label, entry.uri);
@@ -297,10 +302,7 @@ export class NodeTestExplorer implements vscode.Disposable {
             caseItem.description = warning
                 ? `${caseNode.description} · ${summarizeMissingImage(warning)}`
                 : caseNode.description;
-            caseItem.range = new vscode.Range(
-                entry.document.positionAt(caseNode.start),
-                entry.document.positionAt(caseNode.end),
-            );
+            caseItem.range = toRange(caseNode.start, caseNode.end);
             fileItem.children.add(caseItem);
             this.leaves.set(caseItem.id, {
                 filePath: entry.uri.fsPath,
@@ -312,8 +314,13 @@ export class NodeTestExplorer implements vscode.Disposable {
         parent.add(fileItem);
     }
 
+    private isCurrentRefresh(sequence: number): boolean {
+        return !this.disposed && sequence === this.refreshSequence;
+    }
+
     private scheduleRefresh(): void {
         if (this.disposed) return;
+        this.refreshSequence++;
         if (this.refreshTimer) clearTimeout(this.refreshTimer);
         // 这里只能 clear，不能 dispose：诊断集合一旦 dispose 就永久作废，之后的 clear / set 都会抛
         // 「illegal state - object is disposed」，refresh 断在半路，面板被清空后建不回来。
@@ -352,304 +359,435 @@ export class NodeTestExplorer implements vscode.Disposable {
             const targets = collectTargets(request, roots, this.leaves);
             if (targets.length === 0) {
                 await vscode.window.showWarningMessage(
-                    "测试面板里没有可运行的用例：确认 tests 目录下有 test_*.json，且 JSON 没有语法错误。",
+                    "当前选择没有可运行的测试。请检查排除项，并刷新测试面板确认配置收集到了所需文件和用例。",
                 );
                 return;
             }
 
+            const state = this.prepareRun(testRun, targets);
+            if (token.isCancellationRequested) {
+                skipUnfinished(
+                    testRun,
+                    targets.flatMap((target) => targetItems(target, state)),
+                    state,
+                );
+                appendRunSummary(testRun, targets[0].item, {files: [], durationMs: 0, cancelled: true});
+                return;
+            }
             const config = readNodeTestConfig();
             const fileTargets = targets.filter((target) => target.caseIndex === undefined);
             const caseTargets = targets.filter((target) => target.caseIndex !== undefined);
 
-            // 文件级目标合成一次进程（只有一个也是批）；单条用例仍然各自一个进程，保住精确判定
+            // 完整文件合并运行；单条选择和排除后剩余的用例逐条运行。
             if (fileTargets.length > 0) {
                 if (token.isCancellationRequested) {
-                    for (const target of fileTargets) testRun.skipped(target.item);
+                    skipUnfinished(
+                        testRun,
+                        fileTargets.flatMap((target) => targetItems(target, state)),
+                        state,
+                    );
                 } else {
-                    await this.runFileBatch(testRun, fileTargets, workspace, config, token);
+                    await this.runFileBatch(testRun, fileTargets, workspace, config, token, state);
                 }
             }
 
             for (const target of caseTargets) {
                 if (token.isCancellationRequested) {
-                    testRun.skipped(target.item);
+                    skipUnfinished(testRun, [target.item], state);
                     continue;
                 }
-                await this.runTarget(testRun, target, workspace, config, token);
+                await this.runTarget(testRun, target, workspace, config, token, state);
             }
         } finally {
             testRun.end();
         }
     }
 
-    /**
-     * 一批文件级目标：一次进程跑完，再按 RESULT-FILE 行逐文件标记。
-     * 只有一条用例级目标时才用 runTarget（那才有精确的单一结果）。
-     */
+    private prepareRun(testRun: vscode.TestRun, targets: readonly RunTarget[]): RunState {
+        const state: RunState = {casesByTarget: new Map(), started: new Set(), completed: new Set()};
+        const queued = new Set<string>();
+        for (const target of targets) {
+            const cases =
+                target.caseIndex === undefined
+                    ? [...target.item.children].map(
+                          ([
+                              id,
+                              item,
+                          ]) => ({item, caseIndex: this.leaves.get(id)?.caseIndex}),
+                      )
+                    : [];
+            state.casesByTarget.set(target.item.id, cases);
+            for (const item of targetItems(target, state)) {
+                if (queued.has(item.id)) continue;
+                testRun.enqueued(item);
+                queued.add(item.id);
+            }
+        }
+        return state;
+    }
+
+    /** 只接收适配层已经校验的进度；用例快照不能提前结束整个文件。 */
+    private reportProgress(
+        testRun: vscode.TestRun,
+        targets: readonly RunTarget[],
+        workspaceRoot: string,
+        state: RunState,
+        event: TestRunEvent,
+    ): void {
+        if (this.disposed) return;
+        const file = event.type === "file-result" ? event.file : event.origin.file;
+        const key = displayPath(workspaceRoot, file);
+        const target = targets.find((candidate) => toPosix(candidate.relativePath) === key);
+        if (!target) return;
+        if (event.type === "case-started") {
+            const item =
+                target.caseIndex === undefined
+                    ? state.casesByTarget.get(target.item.id)?.find((entry) => entry.caseIndex === event.origin.case)
+                          ?.item
+                    : target.item;
+            if (item) {
+                startItem(testRun, target.item, state);
+                startItem(testRun, item, state);
+            }
+            return;
+        }
+        const adapted = adaptResultFiles(event.result, workspaceRoot);
+        const caseVerdicts = buildCaseVerdicts(adapted);
+        if (event.type === "file-result" && target.caseIndex === undefined) {
+            const verdict = adapted.fileResults.get(key) ?? "error";
+            this.markFileTarget(
+                testRun,
+                target,
+                verdict,
+                this.casesOfTarget(target, caseVerdicts, state),
+                state,
+                reasonText(adapted.fileReasons.get(key), verdict),
+            );
+        } else {
+            this.markKnownCases(testRun, target, caseVerdicts, state);
+        }
+    }
+
+    /** 取消时也保留已校验的完成结果，其它节点才标跳过。 */
+    private markCompletedResults(
+        testRun: vscode.TestRun,
+        targets: readonly RunTarget[],
+        outcome: RunFlowOutcome,
+        state: RunState,
+    ): void {
+        const caseVerdicts = buildCaseVerdicts(outcome);
+        for (const target of targets) {
+            const verdict = fileVerdictOf(outcome, target.relativePath);
+            if (target.caseIndex === undefined && verdict !== undefined) {
+                this.markFileTarget(
+                    testRun,
+                    target,
+                    verdict,
+                    this.casesOfTarget(target, caseVerdicts, state),
+                    state,
+                    reasonText(outcome.fileReasons.get(toPosix(target.relativePath)), verdict),
+                );
+            } else {
+                this.markKnownCases(testRun, target, caseVerdicts, state);
+            }
+        }
+    }
+
+    private markKnownCases(
+        testRun: vscode.TestRun,
+        target: RunTarget,
+        verdicts: ReadonlyMap<string, CaseVerdict>,
+        state: RunState,
+    ): void {
+        const cases =
+            target.caseIndex === undefined
+                ? this.casesOfTarget(target, verdicts, state)
+                : [
+                      {
+                          item: target.item,
+                          caseIndex: target.caseIndex,
+                          info: verdicts.get(caseKeyOf(target.relativePath, target.caseIndex)),
+                      },
+                  ];
+        for (const entry of cases) {
+            if (entry.info)
+                completeItem(testRun, entry.item, entry.info.verdict, entry.info, entry.info.durationMs, state);
+        }
+    }
+
+    /** 收集失败的文件单独报错，其它完整文件合成一次运行，再逐文件和用例显示结果。 */
     private async runFileBatch(
         testRun: vscode.TestRun,
         targets: readonly RunTarget[],
         workspace: NodeTestWorkspace,
         config: {nodePath: string; configPath: string},
         token: vscode.CancellationToken,
+        state: RunState,
     ): Promise<void> {
-        const relativePaths = targets.map((target) => target.relativePath);
-        const title = relativePaths.length === 1 ? buildRunTitle(relativePaths[0]) : buildBatchRunTitle(relativePaths);
+        const startedAt = Date.now();
         const anchor = targets[0].item;
+        const summaryFiles: SummaryFile[] = [];
+        const runnable = targets.filter((target) => !target.collectionError);
+        for (const target of targets) {
+            if (!target.collectionError) continue;
+            const text = {title: "读取测试文件失败", detail: [target.collectionError]};
+            testRun.appendOutput(`✖ ${target.relativePath}：${target.collectionError}\r\n`, undefined, target.item);
+            summaryFiles.push(
+                this.markFileTarget(
+                    testRun,
+                    target,
+                    "error",
+                    this.casesOfTarget(target, new Map(), state),
+                    state,
+                    text,
+                ),
+            );
+        }
+        if (runnable.length === 0) {
+            appendRunSummary(testRun, anchor, {files: summaryFiles, durationMs: Date.now() - startedAt});
+            return;
+        }
 
-        // 文件节点和它的子用例都标成运行中，否则面板上会一直显示「未运行」
-        const reportedItems = targets.flatMap((target) => [
-            target.item,
-            ...[...target.item.children].map(
-                ([
-                    ,
-                    item,
-                ]) => item,
-            ),
-        ]);
-        for (const item of reportedItems) testRun.started(item);
+        const relativePaths = runnable.map((target) => target.relativePath);
+        const title = relativePaths.length === 1 ? buildRunTitle(relativePaths[0]) : buildBatchRunTitle(relativePaths);
+        const reportedItems = runnable.flatMap((target) => targetItems(target, state));
         testRun.appendOutput(`▶ ${title}\r\n`, undefined, anchor);
 
         const runRequest: RunRequest = {
             workspaceRoot: workspace.workspaceRoot,
             nodePath: config.nodePath,
             configPath: config.configPath,
-            testFile: targets[0].filePath,
-            testFileRelativePath: targets[0].relativePath,
-            testFiles: relativePaths.length > 1 ? targets.map((target) => target.filePath) : undefined,
-            testFileRelativePaths: relativePaths.length > 1 ? relativePaths : undefined,
+            testFiles: relativePaths,
+            expectedCases: new Map(
+                runnable.map((target) => [
+                    target.relativePath,
+                    this.casesOfTarget(target, new Map(), state).flatMap((entry) =>
+                        entry.caseIndex === undefined ? [] : [entry.caseIndex],
+                    ),
+                ]),
+            ),
         };
-        testRun.appendOutput(`${describeCommand(runRequest, this.extensionPath)}\r\n`, undefined, anchor);
+        testRun.appendOutput(`${describeCommand(runRequest)}\r\n`, undefined, anchor);
         testRun.appendOutput(toOutputChunk(`${RAW_LOG_BANNER}\n`), undefined, anchor);
 
-        const startedAt = Date.now();
-        const verdicts = new Map<string, FileVerdict>();
-        const caseVerdicts = new Map<string, CaseVerdict>();
-        let pending = "";
-
-        const process = startTestProcess(runRequest, this.extensionPath, {
-            onOutput: (chunk) => {
-                testRun.appendOutput(toOutputChunk(chunk), undefined, anchor);
-                pending += chunk;
-                const lines = pending.split("\n");
-                pending = lines.pop() ?? "";
-                for (const line of lines) {
-                    collectFileVerdict(line, verdicts);
-                    collectCaseVerdict(line, caseVerdicts);
-                }
-            },
+        const process = startTestRun(runRequest, {
+            onOutput: (chunk) => testRun.appendOutput(toOutputChunk(chunk), undefined, anchor),
             onError: (error) => testRun.appendOutput(`✖ 进程没起来：${String(error)}\r\n`, undefined, anchor),
+            onProgress: (event) => this.reportProgress(testRun, runnable, workspace.workspaceRoot, state, event),
         });
         const cancellation = token.onCancellationRequested(() => process.cancel());
         const outcome = await process.done;
         cancellation.dispose();
-        collectFileVerdict(pending, verdicts);
-        collectCaseVerdict(pending, caseVerdicts);
         const duration = Date.now() - startedAt;
 
-        if (outcome.cancelled) {
-            for (const item of reportedItems) testRun.skipped(item);
+        const invalidResult = outcome.errorCode === "invalid-result";
+        if (outcome.cancelled && !invalidResult) {
+            this.markCompletedResults(testRun, runnable, outcome, state);
+            skipUnfinished(testRun, reportedItems, state);
             appendRunSummary(testRun, anchor, {files: [], durationMs: duration, cancelled: true});
             return;
         }
 
-        const summaryFiles: SummaryFile[] = [];
-        for (const target of targets) {
-            const verdict = verdicts.get(target.relativePath) ?? fallbackVerdict(outcome.code);
-            const cases = this.casesOfTarget(target, caseVerdicts);
-            summaryFiles.push({
-                relativePath: target.relativePath,
-                verdict,
-                caseCount: cases.length,
-                cases: problemCases(cases),
-            });
-            this.markFileTarget(testRun, target, verdict, duration, cases);
+        const caseVerdicts = invalidResult ? new Map<string, CaseVerdict>() : buildCaseVerdicts(outcome);
+        for (const target of runnable) {
+            const knownVerdict = invalidResult ? undefined : fileVerdictOf(outcome, target.relativePath);
+            const verdict = knownVerdict ?? "error";
+            const cases = this.casesOfTarget(target, caseVerdicts, state);
+            const reason =
+                outcome.fileReasons.get(toPosix(target.relativePath)) ??
+                (knownVerdict === undefined ? (outcome.error ?? outcome.empty) : undefined);
+            summaryFiles.push(
+                this.markFileTarget(testRun, target, verdict, cases, state, reasonText(reason, verdict), invalidResult),
+            );
         }
 
-        appendRunSummary(testRun, anchor, {files: summaryFiles, durationMs: duration});
+        appendRunSummary(testRun, anchor, {
+            files: summaryFiles,
+            durationMs: duration,
+            error: outcome.error ?? outcome.empty,
+        });
     }
 
-    /** 文件节点下的子用例 → 用例下标 + runner 给的结论；标记和结果块共用这一份 */
-    private casesOfTarget(target: RunTarget, caseVerdicts: ReadonlyMap<string, CaseVerdict>): TargetCase[] {
-        return [...target.item.children].map(
-            ([
-                id,
-                item,
-            ]) => {
-                const leaf = this.leaves.get(id);
-                const info =
-                    leaf?.caseIndex === undefined
-                        ? undefined
-                        : caseVerdicts.get(caseKeyOf(target.relativePath, leaf.caseIndex));
-                return {item, info, caseIndex: leaf?.caseIndex};
-            },
-        );
+    /** 用运行开始时保存的节点和原始下标，匹配已校验的用例结果。 */
+    private casesOfTarget(
+        target: RunTarget,
+        caseVerdicts: ReadonlyMap<string, CaseVerdict>,
+        state: RunState,
+    ): TargetCase[] {
+        return (state.casesByTarget.get(target.item.id) ?? []).map((entry) => ({
+            ...entry,
+            info:
+                entry.caseIndex === undefined
+                    ? undefined
+                    : caseVerdicts.get(caseKeyOf(target.relativePath, entry.caseIndex)),
+        }));
     }
 
     /**
-     * 按文件结论标记。子用例优先用 runner 给的逐用例结论（带具体原因），没有就跟随文件结论。
+     * 文件和用例都使用各自的结果；缺少用例结果时报 error。
+     * 节点显示识别耗时，文件耗时为子用例之和；整次运行的墙钟时间只在结果摘要中显示。
      */
     private markFileTarget(
         testRun: vscode.TestRun,
         target: RunTarget,
         verdict: FileVerdict,
-        duration: number,
         cases: readonly TargetCase[],
-    ): void {
-        // 标记规则在 core 里（纯函数，可单测）：文件通过不代表每条用例都验证过
+        state: RunState,
+        fileText?: VerdictText,
+        invalidate = false,
+    ): SummaryFile {
         const marking = planFileMarking(
             target.relativePath,
             verdict,
             cases.map((entry) => ({caseIndex: entry.caseIndex, info: entry.info})),
+            fileText,
         );
 
-        applyMark(testRun, target.item, marking.file.verdict, marking.file.text, duration);
+        const recoDurationMs = cases.reduce((sum, entry) => sum + (entry.info?.durationMs ?? 0), 0);
+        completeItem(testRun, target.item, marking.file.verdict, marking.file.text, recoDurationMs, state, invalidate);
         for (const entry of cases) {
             const caseMark = marking.cases.find((candidate) => candidate.caseIndex === entry.caseIndex);
-            if (!caseMark) {
-                testRun.skipped(entry.item);
-                continue;
-            }
-            applyMark(testRun, entry.item, caseMark.verdict, caseMark.text, duration);
+            const text = caseMark?.text ?? missingCaseVerdict(target.relativePath, entry.caseIndex);
+            completeItem(
+                testRun,
+                entry.item,
+                caseMark?.verdict ?? "error",
+                text,
+                entry.info?.durationMs ?? 0,
+                state,
+                invalidate,
+            );
         }
+        return {
+            relativePath: target.relativePath,
+            verdict: marking.file.verdict,
+            caseCount: cases.length,
+            cases: marking.cases.map((entry) => ({
+                caseIndex: entry.caseIndex,
+                verdict: entry.verdict,
+                title: entry.text.title,
+            })),
+            reason: fileText?.detail.join("；"),
+        };
     }
 
-    /** 跑单个用例：一次进程，退出码就是这一条的结果 */
+    /** 跑单个用例：单独起一次 maa-tools，只跑这一条 */
     private async runTarget(
         testRun: vscode.TestRun,
         target: RunTarget,
         workspace: NodeTestWorkspace,
         config: {nodePath: string; configPath: string},
         token: vscode.CancellationToken,
+        state: RunState,
     ): Promise<void> {
         const title = buildRunTitle(target.relativePath, target.caseIndex);
-        testRun.started(target.item);
         testRun.appendOutput(`▶ ${title}\r\n`, undefined, target.item);
 
         const runRequest: RunRequest = {
             workspaceRoot: workspace.workspaceRoot,
             nodePath: config.nodePath,
             configPath: config.configPath,
-            testFile: target.filePath,
-            testFileRelativePath: target.relativePath,
+            testFiles: [target.relativePath],
             caseIndex: target.caseIndex,
+            expectedCases: new Map([
+                [
+                    target.relativePath,
+                    target.caseIndex === undefined ? [] : [target.caseIndex],
+                ],
+            ]),
         };
-        testRun.appendOutput(`${describeCommand(runRequest, this.extensionPath)}\r\n`, undefined, target.item);
+        testRun.appendOutput(`${describeCommand(runRequest)}\r\n`, undefined, target.item);
         testRun.appendOutput(toOutputChunk(`${RAW_LOG_BANNER}\n`), undefined, target.item);
 
         const startedAt = Date.now();
-        const caseVerdicts = new Map<string, CaseVerdict>();
-        let pending = "";
-        const process = startTestProcess(runRequest, this.extensionPath, {
-            onOutput: (chunk) => {
-                testRun.appendOutput(toOutputChunk(chunk), undefined, target.item);
-                pending += chunk;
-                const lines = pending.split("\n");
-                pending = lines.pop() ?? "";
-                for (const line of lines) collectCaseVerdict(line, caseVerdicts);
-            },
+        const process = startTestRun(runRequest, {
+            onOutput: (chunk) => testRun.appendOutput(toOutputChunk(chunk), undefined, target.item),
             onError: (error) => testRun.appendOutput(`✖ 进程没起来：${String(error)}\r\n`, undefined, target.item),
+            onProgress: (event) => this.reportProgress(testRun, [target], workspace.workspaceRoot, state, event),
         });
         const cancellation = token.onCancellationRequested(() => process.cancel());
         const outcome = await process.done;
         cancellation.dispose();
-        collectCaseVerdict(pending, caseVerdicts);
         const duration = Date.now() - startedAt;
 
-        if (outcome.cancelled) {
-            testRun.skipped(target.item);
+        const invalidResult = outcome.errorCode === "invalid-result";
+        if (outcome.cancelled && !invalidResult) {
+            this.markCompletedResults(testRun, [target], outcome, state);
+            skipUnfinished(testRun, [target.item], state);
             appendRunSummary(testRun, target.item, {files: [], durationMs: duration, cancelled: true});
             return;
         }
 
-        const verdict = verdictFromExitCode(outcome.code);
-        const known = caseVerdicts.get(caseKeyOf(target.relativePath, target.caseIndex ?? 0));
-        if (verdict === "pass") {
-            testRun.passed(target.item, duration);
-        } else {
-            // 单条用例跑时 runner 也会给逐用例结论，原因比通用话术有用得多
-            const fallback = describeVerdict(verdict, title);
-            const message = buildTestMessage(known?.title ?? fallback.title, known?.detail ?? fallback.detail);
-            if (verdict === "fail") testRun.failed(target.item, message, duration);
-            else testRun.errored(target.item, message, duration);
-        }
+        const known = invalidResult
+            ? undefined
+            : buildCaseVerdicts(outcome).get(caseKeyOf(target.relativePath, target.caseIndex ?? 0));
+        const reason = outcome.error ?? outcome.empty;
+        const info = known ?? missingCaseVerdict(target.relativePath, target.caseIndex, reasonText(reason));
+        completeItem(testRun, target.item, info.verdict, info, info.durationMs, state, invalidResult);
 
-        // 单条用例也补一块结果：形状和整文件跑一致，用户不用记两套读法
+        // 用例可以跳过，而文件仍为 error（例如全缺图）；两层结论分别显示上游原值。
         appendRunSummary(testRun, target.item, {
             files: [
                 {
                     relativePath: target.relativePath,
-                    verdict,
+                    verdict: known ? (fileVerdictOf(outcome, target.relativePath) ?? "error") : "error",
                     caseCount: 1,
-                    cases:
-                        known && known.verdict !== "pass"
-                            ? [{caseIndex: target.caseIndex, verdict: known.verdict, title: known.title}]
-                            : [],
+                    cases: [{caseIndex: target.caseIndex, verdict: info.verdict, title: info.title}],
+                    reason: reason ?? outcome.fileReasons.get(toPosix(target.relativePath)),
                 },
             ],
             durationMs: duration,
+            error: reason,
         });
     }
 }
 
 /**
- * 挑出这次测试运行要跑的目标：
- *   - 没有 include（Run All）→ 所有根节点下的叶子；
- *   - include 是目录节点 → 它下面所有文件；
- *   - include 是文件节点 → 该文件；
- *   - include 是用例节点 → 只跑那一条。
- * 同一个文件既要求整文件、又要求单用例时，整文件优先，避免同一批用例跑两遍。
+ * 把运行全部、目录、文件和单条选择转换为目标。
+ * 排除某条用例时，把文件展开成剩余用例；没有排除项的文件仍可合成一次批量运行。
+ * 同一目标只运行一次；排除父目录或文件时，直接选中的子用例也不运行。
  */
 export function collectTargets(
     request: vscode.TestRunRequest,
     rootItems: readonly vscode.TestItem[],
     leaves: ReadonlyMap<string, LeafInfo>,
 ): RunTarget[] {
-    const excludedIds = new Set((request.exclude ?? []).map((item) => item.id));
-    const isExcluded = (item: vscode.TestItem): boolean =>
-        excludedIds.has(item.id) || (item.parent ? excludedIds.has(item.parent.id) : false);
+    return collectRunTargets(request, rootItems, leaves);
+}
 
-    const included = request.include?.length ? request.include : rootItems;
-    const fileTargets = new Map<string, RunTarget>();
-    const caseTargets: RunTarget[] = [];
-
-    const visit = (item: vscode.TestItem): void => {
-        if (isExcluded(item)) return;
-
-        const leaf = leaves.get(item.id);
-        if (leaf) {
-            if (leaf.caseIndex === undefined) {
-                if (!fileTargets.has(leaf.filePath)) fileTargets.set(leaf.filePath, {...leaf, item});
-            } else {
-                caseTargets.push({...leaf, item});
-            }
-            return;
-        }
-
-        for (const [
-            ,
-            child,
-        ] of item.children)
-            visit(child);
-    };
-
-    for (const item of included) visit(item);
-
-    // 整文件已经覆盖到的用例不再单独跑
-    const deduped = caseTargets.filter((target) => !fileTargets.has(target.filePath));
+function targetItems(target: RunTarget, state: RunState): vscode.TestItem[] {
     return [
-        ...fileTargets.values(),
-        ...deduped,
+        target.item,
+        ...(state.casesByTarget.get(target.item.id) ?? []).map((entry) => entry.item),
     ];
 }
 
-/**
- * 按结论把节点标成通过 / 失败 / 跳过。
- *
- * `skipped` 给「缺图没验证到」的用例用：这类情况不该把整次运行染红，标成灰色的跳过更贴近事实，
- * 具体原因在探测阶段就写进节点描述了。「哪几条因缺图跳过」由运行末尾的结果块统一列出，
- * 这里不再往每个通过节点上各追加一遍 —— 那会把测试输出刷成流水账。
- */
+function startItem(testRun: vscode.TestRun, item: vscode.TestItem, state: RunState): void {
+    if (state.completed.has(item.id) || state.started.has(item.id)) return;
+    testRun.started(item);
+    state.started.add(item.id);
+}
+
+/** 已完成的节点不重复标记；协议错误时才覆盖先前结果。 */
+function completeItem(
+    testRun: vscode.TestRun,
+    item: vscode.TestItem,
+    verdict: CaseOutcome,
+    text: {title: string; detail: readonly string[]},
+    duration: number,
+    state: RunState,
+    invalidate = false,
+): void {
+    if (!invalidate && state.completed.has(item.id)) return;
+    applyMark(testRun, item, verdict, text, duration);
+    state.completed.add(item.id);
+}
+
+function skipUnfinished(testRun: vscode.TestRun, items: readonly vscode.TestItem[], state: RunState): void {
+    for (const item of items) completeItem(testRun, item, "skipped", {title: "已取消", detail: []}, 0, state);
+}
+
+/** 把结构化结论转成 VS Code 标记；跳过原因在结果摘要中列出。 */
 function applyMark(
     testRun: vscode.TestRun,
     item: vscode.TestItem,
@@ -674,23 +812,8 @@ function applyMark(
 /** 原始日志前面的一条分隔：末尾才是结果块，中间这一大段是排错用的原始输出 */
 const RAW_LOG_BANNER = "──── 原始日志（maa-tools 的输出，排错看这里） ────";
 
-/** 文件节点下的子用例里，有问题的那几条才进结果块；通过的只计入数字 */
-function problemCases(cases: readonly TargetCase[]): SummaryCase[] {
-    const collected: SummaryCase[] = [];
-    for (const entry of cases) {
-        const info = entry.info;
-        if (!info || info.verdict === "pass") continue;
-        collected.push({caseIndex: entry.caseIndex, verdict: info.verdict, title: info.title});
-    }
-    return collected;
-}
-
 /** 在测试输出末尾补一块「结果」：结论一行、计数、耗时，然后只列有问题的地方 */
-function appendRunSummary(
-    testRun: vscode.TestRun,
-    anchor: vscode.TestItem,
-    input: {files: readonly SummaryFile[]; durationMs: number; cancelled?: boolean},
-): void {
+function appendRunSummary(testRun: vscode.TestRun, anchor: vscode.TestItem, input: SummaryInput): void {
     const lines = buildRunSummary(input);
     testRun.appendOutput(toOutputChunk(`${lines.join("\n")}\n`), undefined, anchor);
 }
@@ -700,7 +823,31 @@ function buildTestMessage(title: string, detail: readonly string[]): vscode.Test
     return new vscode.TestMessage(new vscode.MarkdownString(buildMessageMarkdown(title, detail)));
 }
 
-/** TestRun.appendOutput 要求换行用 \r\n，否则测试输出面板里会挤成一坨 */
+/** 逐用例显示文案；键已由 adapter 统一成相对路径和原始下标。 */
+function buildCaseVerdicts(outcome: Pick<RunFlowOutcome, "caseResults">): Map<string, CaseVerdict> {
+    return new Map(
+        [...outcome.caseResults].map(
+            ([
+                key,
+                info,
+            ]) => [
+                key,
+                caseInfoToVerdict(info),
+            ],
+        ),
+    );
+}
+
+function reasonText(reason: string | undefined, verdict: FileVerdict = "error"): VerdictText | undefined {
+    if (!reason) return undefined;
+    return {title: verdict === "fail" ? "断言失败" : verdict === "pass" ? "通过" : "没有完成验证", detail: [reason]};
+}
+
+/** 文件键口径：相对路径统一正斜杠，和归位结果的键对齐 */
+function fileVerdictOf(outcome: RunFlowOutcome, relativePath: string): FileVerdict | undefined {
+    return outcome.fileResults.get(toPosix(relativePath));
+}
+
 function toOutputChunk(chunk: string): string {
     return chunk.replace(/\r?\n/g, "\r\n");
 }

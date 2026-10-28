@@ -1,44 +1,45 @@
-export interface RunnerArgsInput {
-    /** runner 脚本绝对路径：<扩展安装目录>/runner/run-single-test.mjs */
-    runnerScriptPath: string;
-    /** 仓库根绝对路径 */
-    workspaceRoot: string;
-    /** maatools 配置路径，相对仓库根 */
+/** maa-tools 配置文件的默认名（相对仓库根） */
+export const DEFAULT_CONFIG = "maatools.config.mts";
+
+export interface MaaToolsArgsInput {
+    /** maa-tools 命令行入口绝对路径：<仓库根>/node_modules/@nekosu/maa-tools/bin/maa-tools */
+    cliPath: string;
+    /** maa-tools 配置路径，相对仓库根；不是默认值时作为位置参数传给 maa-tools */
     configPath: string;
-    /** 测试文件，绝对路径或相对仓库根都行，这里原样传下去 */
-    testFile: string;
-    /**
-     * 一次跑多个文件时用：非空就忽略 testFile，给每个文件各来一个 `--file`。
-     * 批量跑只为省掉每个文件重新准备 MaaFW 的固定开销，判定粒度变成「每个文件」。
-     */
-    testFiles?: readonly string[];
+    /** 测试文件路径（相对仓库根；maa-tools 按 --file 过滤） */
+    testFiles: readonly string[];
     /** 用例下标，从 0 开始。不传就是跑整个文件 */
     caseIndex?: number;
-    /** 只打印计划，不真正执行 */
-    dryRun?: boolean;
+    /** list = 收集测试文件与用例清单；run = 真跑 */
+    mode: "list" | "run";
 }
 
 /**
- * 拼出交给 `node` 的完整参数数组（第 0 项是 runner 脚本路径）。
- * 参数顺序固定成 --workspace / --config / 若干 --file / --case / --dry-run，方便对着日志排查。
+ * 拼出交给 `node` 的完整参数数组（第 0 项是 maa-tools 命令行入口）。
+ * 参数顺序固定为 test / --list --json 或 --jsonl / 若干 --file / --case / 配置路径，方便对着日志排查。
  */
-export function buildRunnerArgs(input: RunnerArgsInput): string[] {
-    const files = input.testFiles && input.testFiles.length > 0 ? input.testFiles : [input.testFile];
+export function buildMaaToolsArgs(input: MaaToolsArgsInput): string[] {
+    const flags =
+        input.mode === "list"
+            ? [
+                  "--list",
+                  "--json",
+              ]
+            : ["--jsonl"];
     const args = [
-        input.runnerScriptPath,
-        "--workspace",
-        input.workspaceRoot,
-        "--config",
-        input.configPath,
+        input.cliPath,
+        "test",
+        ...flags,
     ];
-    for (const file of files) {
+    for (const file of input.testFiles) {
         args.push("--file", file);
     }
     if (input.caseIndex !== undefined) {
         args.push("--case", String(input.caseIndex));
     }
-    if (input.dryRun) {
-        args.push("--dry-run");
+    // 收集与运行加载相同配置；默认文件名由 maa-tools 自己处理。
+    if (input.configPath !== DEFAULT_CONFIG) {
+        args.push(input.configPath);
     }
     return args;
 }

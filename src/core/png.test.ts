@@ -1,10 +1,10 @@
-import assert from "node:assert/strict";
+import {strict as assert} from "node:assert";
 import {test} from "node:test";
 
-import {readPngSize} from "./png.mjs";
+import {readPngSize} from "./png";
 
 /** 造一个只带文件头的假 PNG：签名 + 块长度 + IHDR + 宽 + 高。 */
-function pngHeader(width, height) {
+function pngHeader(width: number, height: number): Buffer {
     const buffer = Buffer.alloc(33);
     Buffer.from([
         0x89,

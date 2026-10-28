@@ -2,7 +2,6 @@ import type {TestDocument} from "./document";
 
 export const RUN_FILE_COMMAND = "maaNodeTest.runFile";
 export const RUN_CASE_COMMAND = "maaNodeTest.runCase";
-export const SHOW_PLAN_COMMAND = "maaNodeTest.showPlan";
 
 /** CodeLens 的描述，vscode 那一层再把它翻译成 Range + 命令参数 */
 export interface CodeLensDescriptor {

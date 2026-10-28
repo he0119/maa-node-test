@@ -1,259 +1,153 @@
-// 把 runner 打出来的结论行翻译成测试面板要用的东西：文件结论、逐用例结论、失败文案。
-//
-// 单独放一个纯模块（不 import vscode）是为了能直接单测：解析是「runner 输出格式」的契约另一端，
-// 格式一旦变，这里的测试应该先红。
-//
-// 文案分两层：
-//   title  —— 面板节点上显示的那一行，越短越好（「CloudADB-官服 失败」「2 条用例失败」）；
-//   detail —— 点开测试结果后看到的列表项（哪个节点、什么原因、哪张截图、哪些平台是好的）。
+// 把 maa-tools 给出的文件、用例结论转成测试面板标记和中文说明。
+// 不重新计算测试结论；所选用例缺少结果时，明确报结果不完整。
+// 不 import vscode，便于在普通 Node 环境验证。
 
 /** 单个文件的结论 */
 export type FileVerdict = "pass" | "fail" | "error";
 
-/**
- * 单条用例的结论。
- *
- * 比文件多一个 `skipped`：某个平台缺截图时，maa-tools 会跳过那条用例并当作通过，
- * 这条用例在面板里既不是通过也不是失败，标成「跳过」最贴近事实（缺图不该让整次运行变红）。
- */
+/** 单条用例还可以被跳过，表示至少有平台没有完成验证，不能标成用例通过。 */
 export type CaseOutcome = FileVerdict | "skipped";
 
-/** 单条用例的结论 + 具体原因（原因来自 maa-tools 的 error_details.json） */
+/** 单条用例的结论、原因和识别耗时，均来自 maa-tools 的结构化结果。 */
 export interface CaseVerdict {
     verdict: CaseOutcome;
     title: string;
     detail: string[];
+    durationMs: number;
 }
 
-/** 一条用例最终要标成什么，以及悬停时显示什么 */
 export interface CaseMark {
     caseIndex?: number;
     verdict: CaseOutcome;
     text: VerdictText;
 }
 
-/** 一次文件级运行要打给面板的全部标记 */
 export interface FileMarking {
     file: {verdict: FileVerdict; text: VerdictText};
     cases: CaseMark[];
 }
 
-/** 一段给人看的文案：短标题 + 展开后的列表项 */
+/** 节点上的短标题，以及展开结果后看到的说明。 */
 export interface VerdictText {
     title: string;
     detail: string[];
 }
 
-/** runner 给每个文件打的结论行：`RESULT-FILE: <相对路径> pass|fail|error` */
-export const FILE_RESULT_PATTERN = /^RESULT-FILE: (.+) (pass|fail|error)$/;
-
-/**
- * runner 给单条用例打的结论行：`RESULT-CASE: {"file":…,"case":…,"verdict":…,"title":…,"detail":[…]}`。
- * 用 JSON 是因为失败原因里带空格、逗号和反引号。
- */
-export const CASE_RESULT_PREFIX = "RESULT-CASE: ";
-
-/** 从一行输出里抓 `RESULT-FILE:` 结论 */
-export function collectFileVerdict(line: string, verdicts: Map<string, FileVerdict>): void {
-    const match = line.replace(/\r$/, "").match(FILE_RESULT_PATTERN);
-    if (!match) return;
-    verdicts.set(toPosix(match[1]), match[2] as FileVerdict);
-}
-
-/** 从一行输出里抓 `RESULT-CASE:` 结论 */
-export function collectCaseVerdict(line: string, verdicts: Map<string, CaseVerdict>): void {
-    const trimmed = line.replace(/\r$/, "");
-    if (!trimmed.startsWith(CASE_RESULT_PREFIX)) return;
-    try {
-        const payload = JSON.parse(trimmed.slice(CASE_RESULT_PREFIX.length)) as {
-            file?: unknown;
-            case?: unknown;
-            verdict?: unknown;
-            title?: unknown;
-            detail?: unknown;
-        };
-        if (typeof payload.file !== "string" || !Number.isInteger(payload.case)) return;
-        if (
-            payload.verdict !== "pass" &&
-            payload.verdict !== "fail" &&
-            payload.verdict !== "error" &&
-            payload.verdict !== "skipped"
-        )
-            return;
-        verdicts.set(caseKeyOf(toPosix(payload.file), payload.case as number), {
-            verdict: payload.verdict,
-            title: typeof payload.title === "string" ? payload.title : "断言失败",
-            detail: Array.isArray(payload.detail)
-                ? payload.detail.filter((item): item is string => typeof item === "string")
-                : [],
-        });
-    } catch {
-        // 不是合法的 JSON 就当没这一行：文件级结论照样有效
-    }
-}
-
-/** 逐用例结论的键：相对路径 + 用例下标 */
+/** 逐用例结论的键：相对路径 + 用例下标。 */
 export function caseKeyOf(relativePath: string, caseIndex: number): string {
-    return `${toPosix(relativePath)}#${caseIndex}`;
+    return `${relativePath.replace(/\\/g, "/")}#${caseIndex}`;
 }
 
-/** 退出码 → 文件结论 */
-export function verdictFromExitCode(code: number | null): FileVerdict {
-    if (code === 0) return "pass";
-    if (code === 1) return "fail";
-    return "error";
-}
-
-/** 批量跑兜底：进程整体成功但某个文件没有结论行时，按 pass；否则一律 error */
-export function fallbackVerdict(processExitCode: number | null): FileVerdict {
-    return processExitCode === 0 ? "pass" : "error";
-}
-
-/**
- * 通用话术。只在 runner 没给出逐用例原因时兜底用 —— 正常情况下会直接说「节点 X 没命中」。
- */
+/** 上游未给具体原因时使用的说明。 */
 export function describeVerdict(verdict: FileVerdict, title: string): VerdictText {
     if (verdict === "fail") {
         return {
             title: "断言失败",
-            detail: [
-                `${title} 有失败，但这次没拿到具体原因（可能是 node 版本低于 22 导致明细解析失败）`,
-                "展开测试输出看红色组名，或查看工作区的 tests/maatools/error_details.json",
-            ],
+            detail: [`maa-tools 报告 ${title} 失败，但没有提供具体原因。请查看测试输出中的原始日志。`],
         };
     }
     if (verdict === "error") {
         return {
-            title: "没跑起来",
-            detail: [
-                `${title} 没有被验证到（不是断言失败）`,
-                "常见原因：node 版本低于 22（改设置 maaNodeTest.nodePath）、截图一张都不存在、",
-                "maatools 配置加载失败、MaaFW 首次下载失败。测试输出里有具体原因。",
-            ],
+            title: "没有完成验证",
+            detail: [`${title} 没有完成验证。请查看测试输出中的错误原因。`],
         };
     }
     return {title: "通过", detail: []};
 }
 
-/**
- * 文件节点的文案：标题只说「几条用例失败」，展开后逐条列出是哪条用例、什么原因。
- * 只有一条失败时直接把它的标题和详情拿来用，省一层点击。
- */
+/** 所选用例没有结果时不能补成通过，也不能猜它是否断言失败。 */
+export function missingCaseVerdict(relativePath: string, caseIndex?: number, reason?: VerdictText): CaseVerdict {
+    return {
+        verdict: "error",
+        title: reason?.title ?? "缺少用例结果",
+        detail: reason?.detail ?? [
+            `maa-tools 没有返回 ${relativePath} 第 ${formatIndex(caseIndex)} 个用例的结果，无法确认是否通过。`,
+            "请刷新测试面板后重跑，并查看测试输出中的错误原因。",
+        ],
+        durationMs: 0,
+    };
+}
+
+/** 文件失败说明：只有一条有问题时直接展示它的原因，多条时逐条列出。 */
 export function describeFileFailure(
     relativePath: string,
     verdict: FileVerdict,
     knownCases: readonly {info?: CaseVerdict; caseIndex?: number}[],
 ): VerdictText {
-    const failing = knownCases.filter((entry) => entry.info !== undefined && isProblemOutcome(entry.info.verdict));
-
-    if (failing.length === 0) return describeVerdict(verdict, relativePath);
-
-    if (failing.length === 1) {
-        const entry = failing[0];
+    const problems = knownCases.filter((entry) => entry.info !== undefined && isProblemOutcome(entry.info.verdict));
+    if (problems.length === 0) return describeVerdict(verdict, relativePath);
+    if (problems.length === 1) {
+        const entry = problems[0];
         return {
-            title: `第 ${formatIndex(entry.caseIndex)} 个用例：${entry.info?.title ?? "失败"}`,
+            title: `第 ${formatIndex(entry.caseIndex)} 个用例：${entry.info?.title ?? "没有完成验证"}`,
             detail: entry.info?.detail ?? [],
         };
     }
-
     const detail: string[] = [];
-    for (const entry of failing) {
-        detail.push(`第 ${formatIndex(entry.caseIndex)} 个用例 · ${entry.info?.title ?? "失败"}`);
+    for (const entry of problems) {
+        detail.push(`第 ${formatIndex(entry.caseIndex)} 个用例 · ${entry.info?.title ?? "没有完成验证"}`);
         for (const line of entry.info?.detail ?? []) detail.push(`    ${line}`);
     }
-    return {title: `${failing.length} 条用例失败`, detail};
+    const allFailed = problems.every((entry) => entry.info?.verdict === "fail");
+    return {title: `${problems.length} 条用例${allFailed ? "失败" : "没有通过验证"}`, detail};
 }
 
-/**
- * 决定文件节点和各条用例分别标成什么。
- *
- * 缺图不算失败：声明的某个平台缺截图时，maa-tools 会跳过那一条用例并当作通过。这种情况标成
- * **跳过**（灰的），文件仍然算通过，但把「哪几条没验证到」写进文件节点的提示里 —— 既不把整次运行
- * 染红，也不会让人误以为每条用例都验证过了。
- */
+/** 使用上游结论标记节点；这里只额外检查所选用例是否都有结果。 */
 export function planFileMarking(
     relativePath: string,
     verdict: FileVerdict,
     cases: readonly {caseIndex?: number; info?: CaseVerdict}[],
+    fileText?: VerdictText,
 ): FileMarking {
-    const problems = cases.filter((entry) => entry.info !== undefined && isProblemOutcome(entry.info.verdict));
-    const skipped = cases.filter((entry) => entry.info?.verdict === "skipped");
-
-    if (verdict === "pass" && problems.length === 0) {
-        return {
-            file: {verdict: "pass", text: {title: "通过", detail: describeSkippedCases(skipped)}},
-            cases: cases.map((entry) => markOfCase(entry, "pass")),
+    const missing = cases.filter((entry) => !entry.info);
+    const complete = cases.map((entry) => ({
+        caseIndex: entry.caseIndex,
+        info: entry.info ?? missingCaseVerdict(relativePath, entry.caseIndex, fileText),
+    }));
+    const fileVerdict = missing.length > 0 ? "error" : verdict;
+    let text: VerdictText;
+    if (fileText) {
+        text = fileText;
+    } else if (missing.length > 0) {
+        text = {
+            title: "结果不完整",
+            detail: missing.map((entry) => `第 ${formatIndex(entry.caseIndex)} 个用例没有返回结果，不能确认是否通过。`),
         };
+    } else if (fileVerdict === "pass") {
+        text = {title: "通过", detail: describeSkippedCases(complete)};
+    } else {
+        text = describeFileFailure(relativePath, fileVerdict, complete);
     }
-
-    // 文件本身没有断言失败，但（理论上）有用例失败
-    if (verdict === "pass") {
-        const hasFailure = problems.some((entry) => entry.info?.verdict === "fail");
-        const detail: string[] = [];
-        for (const entry of problems) {
-            detail.push(`第 ${formatIndex(entry.caseIndex)} 个用例 · ${entry.info?.title ?? "没验证到"}`);
-            for (const line of entry.info?.detail ?? []) detail.push(`    ${line}`);
-        }
-        return {
-            file: {
-                verdict: hasFailure ? "fail" : "error",
-                text: {
-                    title: hasFailure ? "有用例失败" : `${problems.length} 条用例有问题`,
-                    detail,
-                },
-            },
-            cases: cases.map((entry) => markOfCase(entry, "pass")),
-        };
-    }
-
-    const fileText = describeFileFailure(relativePath, verdict, cases);
     return {
-        file: {verdict, text: fileText},
-        // 有逐用例信息的按自己的结论标；没被点名的说明它确实通过了；一条信息都没有时跟随文件结论
-        cases: cases.map((entry) => markOfCase(entry, problems.length === 0 ? verdict : "pass")),
+        file: {verdict: fileVerdict, text},
+        cases: complete.map((entry) => ({caseIndex: entry.caseIndex, verdict: entry.info.verdict, text: entry.info})),
     };
 }
 
-/** 真问题（失败 / 没跑起来）才算问题，跳过不算 */
 function isProblemOutcome(outcome: CaseOutcome): boolean {
     return outcome === "fail" || outcome === "error";
 }
 
-/** 文件通过时，把「哪几条因为缺图跳过」写成提示明细，没有就返回空 */
-function describeSkippedCases(skipped: readonly {caseIndex?: number; info?: CaseVerdict}[]): string[] {
+/** 文件通过时仍明确列出跳过的用例，避免把跳过看成通过。 */
+function describeSkippedCases(cases: readonly {caseIndex?: number; info: CaseVerdict}[]): string[] {
+    const skipped = cases.filter((entry) => entry.info.verdict === "skipped");
     if (skipped.length === 0) return [];
     return [
-        `${skipped.length} 条用例没有验证到（缺图跳过，不算失败，补图后重跑即可）`,
-        ...skipped.map((entry) => `第 ${formatIndex(entry.caseIndex)} 个用例 · ${entry.info?.title ?? "缺图跳过"}`),
+        `${skipped.length} 条用例未在全部平台完成验证（缺图跳过，补图后重跑即可）`,
+        ...skipped.map((entry) => `第 ${formatIndex(entry.caseIndex)} 个用例 · ${entry.info.title}`),
     ];
 }
 
-/** 单条用例的标记：有结论就用自己的，没有就用 fallback */
-function markOfCase(entry: {caseIndex?: number; info?: CaseVerdict}, fallback: FileVerdict): CaseMark {
-    if (entry.info) return {caseIndex: entry.caseIndex, verdict: entry.info.verdict, text: entry.info};
-    return {caseIndex: entry.caseIndex, verdict: fallback, text: {title: "通过", detail: []}};
-}
-
-/**
- * 拼成测试面板要的 Markdown：第一行是粗体短标题（面板内联显示的就是它），
- * 空一行后是列表项，点开测试结果就能看到完整明细。
- */
+/** 第一行是粗体短标题，明细按 Markdown 列表显示。 */
 export function buildMessageMarkdown(title: string, detail: readonly string[]): string {
     if (detail.length === 0) return `**${title}**`;
     return [
         `**${title}**`,
         "",
-        // 明细里以两个以上空格开头的行当作子项（例如文件节点下面再列每条用例的原因）
         ...detail.map((line) => (/^ {2,}/.test(line) ? `  - ${line.trim()}` : `- ${line.trim()}`)),
     ].join("\n");
 }
 
-/** 用例下标给人看时从 1 开始；拿不到就写问号 */
 function formatIndex(caseIndex: number | undefined): string {
     return caseIndex === undefined ? "?" : String(caseIndex + 1);
-}
-
-/** 统一正斜杠，跨平台才能和 runner 的输出对上 */
-function toPosix(target: string): string {
-    return target.replace(/\\/g, "/");
 }

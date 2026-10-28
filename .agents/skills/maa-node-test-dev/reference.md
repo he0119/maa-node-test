@@ -1,460 +1,237 @@
-# 参考：契约与内部细节
+# 参考：对接与内部细节
 
-`SKILL.md` 讲流程，这里放「改之前必须知道的事实」：文件职责、runner 命令行契约、退出码映射、过滤规则、hover 文本格式、测试面板语义。
+[SKILL](SKILL.md) 说明修改与验证步骤，这里记录文件职责、maa-tools 接口、结果显示、编辑辅助和构建发布。用户用法见 [README](../../../README.md)。
 
 ## 文件职责
 
-### `src/`
+下表路径均相对 `src/`。
 
 | 文件 | 职责 |
 | --- | --- |
-| `extension.ts` | 装配层：建输出面板、实例化 runner 与测试面板、注册两个 provider 和四个命令；`deactivate` 收掉子进程 |
-| `config.ts` | 读 `maaNodeTest.*` 设置；认定哪个 workspace folder 是仓库根（含 `configPath` 的那个） |
-| `runner.ts` | `startTestProcess()` 统一起进程/收输出/给退出码；`NodeTestRunner` 负责输出面板、状态栏、退出码提示 |
-| `testing.ts` | `NodeTestExplorer`：TestController 的发现、运行、结果映射；`collectTargets()` 挑本次目标 |
-| `providers/codeLens.ts` | 把 `core/lens.ts` 的描述翻成 `vscode.CodeLens`；导出共用的文件选择器 |
-| `providers/hover.ts` | 定位 image 字段 → 扫测试集 → `MarkdownString`，range 限定在图片值上 |
-| `core/document.ts` | jsonc 解析：configs（字符串/数组统一成数组）、cases（offset、image 键/值 span、hitCount、endOffset）、problems |
-| `core/testset.ts` | 扫一级目录=平台、二级目录=资源；按平台找同名截图；读 PNG 头拿尺寸 |
-| `core/hover.ts` | 拼 hover 的 Markdown 正文（绝对路径→URI 由回调注入，不 import vscode） |
-| `core/lens.ts` | 生成 CodeLens 描述 + 命令 id 常量 |
-| `core/runnerArgs.ts` | 拼 runner 参数、拼可打印命令行、拼运行标题 |
-| `core/testResult.ts` | 解析 `RESULT-FILE:` / `RESULT-CASE:` 行、退出码映射、失败文案（短标题 + 明细列表）、拼 Markdown、`planFileMarking()` 决定每个节点标什么 |
-| `core/runSummary.ts` | 把一次运行压成测试输出末尾的结果块：结论 + 文件/用例计数 + 只列失败、没跑起来、缺图跳过的用例（纯字符串，可单测） |
-| `core/missingImages.ts` | 探测阶段查缺图：哪些声明平台没有这张截图、平台目录是否压根不存在，以及对应的诊断文案 |
-| `core/loaderMaps.ts` | 解析 `tests/scripts/loader.mts` 的 `controllerMap` / `resourceMap`（显示名 → 截图目录名），供补全、缺图检查、悬浮共用 |
-| `core/completion.ts` | 用 `jsonc-parser` 的 `getLocation` 判断光标在哪一层，给出该位置的候选（纯逻辑） |
-| `core/repoIndex.ts` | 补全的数据来源：loader 映射、测试集截图名、pipeline 节点索引，各自带缓存 |
-| `core/hits.ts` | 解析测试文件里 `hits` 的每一项（字符串和 `{node: ...}` 两种写法）及其位置，供内联提示用；提示文案的截断也在这里 |
-| `core/pipeline.ts` | 解析 pipeline 文件里每个节点的位置与说明（`desc` / `focus` / 识别 / 动作），以及 `hits` 路径判断 |
-| `core/resources.ts` | 读 `interface.json` 的控制器 → 资源目录映射，算出某份测试文件该扫哪些资源 |
-| `providers/inlayHints.ts` | `hits` 节点名后面的注释（`desc`），点击跳定义 |
-| `providers/definition.ts` | `hits` 里的节点名 Ctrl+Click / F12 跳到 pipeline 里的定义 |
-| `core/testExplorer.ts` | 把测试文件翻成测试面板的树描述（id、label、description、range）；`folderSegments()` 决定目录分组层级 |
+| `extension.ts` | 创建输出面板、runner、测试面板、版本状态栏和 provider，注册命令，停用时清理 |
+| `status.ts`、`core/toolStatus.ts` | 版本查询、左侧状态栏与完整来源提示；查询与兼容检查共用结果 |
+| `config.ts` | 读取 `maaNodeTest.*`；优先选含配置路径的工作区文件夹，否则用第一个 |
+| `runner.ts` | `startTestRun()` 共用运行入口、活动运行管理；`NodeTestRunner` 负责命令与 CodeLens 的输出和提示 |
+| `testing.ts` | `NodeTestExplorer` 收集、建树、选择范围、排除与取消，将框架结果转换为 VS Code 标记 |
+| `core/runnerArgs.ts` | 拼收集与运行参数、显示命令和标题 |
+| `core/testExplorer.ts` | 收集条目转换为树描述：标题、说明、目录和源码范围 |
+| `core/testResult.ts` | 结果消息与面板标记；不替代框架判定，缺项按错误处理 |
+| `core/runSummary.ts` | 根据明确的逐用例状态计数，生成运行末尾的结果摘要 |
+| `maatools/cli.ts` | 定位被测仓库的命令入口、读取和查询版本 |
+| `maatools/list.ts` | 调用 `test --list --json`，检查收集结果格式和错误 |
+| `maatools/flow.ts` | 起一次 `test --jsonl`、逐行读取进度与最终报告、转发日志、取消、校验并核对即时事实 |
+| `maatools/protocol.ts` | 最终结果与事件的本地类型和运行时检查：版本、字段、来源、范围、覆盖及汇总一致性 |
+| `maatools/progress.ts` | 已开始与已完成事实、相同重复去重、矛盾检查、最终对账，以及取消时可保留的结果 |
+| `maatools/results.ts` | 将已校验的上游文件/用例结果转换为显示数据和中文原因 |
+| `maatools/render.ts` | 把已知结果与实际截图路径排成日志 |
+| `maatools/paths.ts` | 解析请求路径，绝对路径转换为显示用的相对路径 |
+| `core/document.ts`、`core/lens.ts` | 编辑文本解析与 CodeLens 描述，不决定实际运行输入是否合法 |
+| `core/testset.ts`、`core/png.ts`、`core/hover.ts` | 扫描编辑辅助截图目录、读取图片尺寸、排序和拼预览 |
+| `core/missingImages.ts` | 编辑时的缺图提示及源码范围 |
+| `core/loaderMaps.ts`、`core/resources.ts` | 读取 loader 字符串映射、interface 的控制器资源目录约定 |
+| `core/completion.ts`、`core/hits.ts`、`core/pipeline.ts`、`core/repoIndex.ts` | 补全位置、节点名与注释、源码索引及缓存 |
+| `providers/` | CodeLens、悬浮、补全、内联提示和定义跳转的 VS Code 转换 |
 
-### `runner/`
+`core/` 和 `maatools/` 都不导入 `vscode`，因此数据转换可以在 Node 中测试。目录里也有文件与进程操作，不能把整层称作纯函数。
 
-| 文件 | 职责 |
+## 为什么使用仓库里的 maa-tools
+
+扩展不自带 `@nekosu/maa-tools` 副本，只调用：
+
+```text
+<被测仓库>/node_modules/@nekosu/maa-tools/bin/maa-tools
+```
+
+仓库配置、命令行测试和编辑器测试使用同一版本的工具，减少版本差异；MaaFramework 的版本与准备方式仍由该仓库配置决定。实际识别结果还受配置、资源和框架版本影响，使用同一工具并不是“两处结果必然一致”的保证。
+
+找不到入口时明确报错。最低版本要求为 1.1.3；运行时另检查 `schemaVersion: 1` 和必需字段，不能仅凭版本号接受任意 JSON。安装命令不会自动突破锁文件，升级提示应引导检查依赖声明、锁文件和实际安装的版本。
+
+## 工具版本状态栏
+
+`MaaToolsVersionStatus` 使用左侧 `StatusBarItem`，与 MaaSupport/MaaFramework 一样省略优先级参数，使用 VS Code 默认优先级。runner 显示运行数量的状态项仍为 priority 100。版本查询与兼容提示共用结果。
+
+- 被测仓库有配置或 maa-tools 包时常显，编辑普通文件也显示；无工作区，或普通项目两者都没有时隐藏。
+- 正常标题为无图标的 `maa-tools <版本>`；查询中、未安装、过旧和查询失败均显示对应文字。
+- 优先使用 `maa-tools --version`。查询失败时，安装包版本只供排错：过旧仍标过旧，其余标未确认或版本未知，不能据包声明确认命令可运行。
+- 点击整项执行 `maaNodeTest.refreshToolVersion`，只查询、不运行测试或打开新面板。悬浮提示保留版本来源、最低版本、仓库、命令入口、软链接实际文件、Node、配置和失败原因。
+- 工作区、`nodePath`、`configPath`、配置文件、相关包清单与锁文件、工具入口及安装位置变化后刷新，也监视软链接实际目标。
+- 查询与防抖刷新有序号，旧结果不能覆盖新状态；停用时清理定时器、监听和状态栏项。
+
+## 测试定义与来源
+
+收集和运行均加载同一份配置并展开 `test.cases`；它可以是数组或异步函数。收集只省略 MaaFramework 初始化与识别，不绕过 loader，也不固定扫描某个目录来代替配置。
+
+maa-tools 的 `loadTestCases()` 和 `loadAllTestCases()` 共用文件读取与结构校验，并给每条用例填 `origin: {file, case}`：`file` 是规范化绝对路径，`case` 是源文件 `cases` 数组的原始下标。loader 展开控制器或资源时必须保留它，例如复制用例时保留 `...testCase`。手写 origin 也必须满足绝对路径和非负安全整数下标，格式非法时报 `test-source-invalid`，与完全没有来源的程序组不同。组名只用于显示，重复组名、相同截图、相同节点或不同期望框不构成来源依据。
+
+收集仅列出实际进入配置展开结果的文件与原始下标，不把“曾被读取但配置主动排除”的有效文件当成可运行测试。读取失败的文件保留 `error` 条目，供面板单独报错。没有来源的程序生成组会产生清楚的收集错误；全量库调用可运行这种组并返回 `groups`，但按文件选择不能猜来源。
+
+## 命令接口
+
+所有命令以被测仓库根为工作目录：
+
+```bash
+node node_modules/@nekosu/maa-tools/bin/maa-tools test --list [配置路径]
+node node_modules/@nekosu/maa-tools/bin/maa-tools test --list --json [配置路径]
+node node_modules/@nekosu/maa-tools/bin/maa-tools test --jsonl --file <测试路径> [--file <另一文件>] [配置路径]
+node node_modules/@nekosu/maa-tools/bin/maa-tools test --jsonl --file <测试路径> --case 0 [配置路径]
+node node_modules/@nekosu/maa-tools/bin/maa-tools test --json --file <测试路径> [配置路径]
+node node_modules/@nekosu/maa-tools/bin/maa-tools --version
+```
+
+- 非默认 `configPath` 同时传给收集与运行。`testsetDir` 是编辑辅助设置，不传给运行以覆盖框架图片路径。
+- `--file` 按规范化绝对来源精确匹配，可重复；相对路径相对命令工作目录。
+- `--case` 为文件内原始下标，从 0 开始，可重复选择多条，但必须配单个文件。CLI 要求完整的非负十进制安全整数；越界属于参数错误。
+- 控制器、资源和来源过滤取交集。展开时先固定完整待检查节点，选择单条不会删除该组其他节点的“不应命中”检查。
+- `--list` 选择收集，`--json` 选择格式，可组合：单独 `--list` 显示人类列表，扩展用 `--list --json` 读取一份清单。两种列表都不初始化 MaaFramework。
+- 默认运行输出文本，`--json` 输出完整运行 JSON，`--jsonl` 输出进度并以唯一 `run-result` 结束。`--json` 与 `--jsonl` 互斥；`--list` 不支持 `--jsonl` 或 `--case`。
+- 所有收集及机器格式输出都从配置加载前把 JavaScript 日志转到 stderr。单独 `--list` 的错误不输出 JSON，组合 `--list --json` 保留完整错误 JSON；含 `--jsonl` 的非法组合仍以 `run-result` 错误报告结束。`--version` 输出普通版本字符串。
+- 扩展转发 stderr，但不从日志行、退出码或错误明细文件推算逐用例结论。命令、配置或结果错误依靠结构化错误代码与说明区分。
+
+## 收集结果
+
+`--list --json` 成功收集的顶层为 `{schemaVersion: 1, files: [...]}`。收集失败含 `errorCode`、`reason`，CLI 顶层错误结果还带 `status: 'error'`、`groups` 和 `durationMs`；可以保留已经识别的文件。单独 `--list` 将同一结果显示为文件、原始下标、名称或截图、文件错误及总数，不输出这份 JSON。
+
+| 字段 | 含义 |
 | --- | --- |
-| `run-single-test.mjs` | 唯一入口：参数 → 读测试文件 → 算 target → 加载配置 → 过滤 → 截图预检 → dry-run 或 `runTest` → RESULT + 退出码 |
-| `lib/args.mjs` | 手写参数解析 + 用法文本；`--case` 只收非负整数 |
-| `lib/test-file.mjs` | 读目标文件（jsonc）、结构规整、`buildTarget`（`--case` 越界抛专用错误） |
-| `lib/case-key.mjs` | 用例键 = `<图片名>\|<命中节点按字典序去重后逗号连接>`；`hits` 支持字符串与 `{node, box}` |
-| `lib/filter.mjs` | `filterGroupsForFiles()` 批量过滤（不就地改入参）：留下目标文件的组和用例，并给出「组名 → 哪些文件」的归属；`filterGroups()` 是单文件版本 |
-| `lib/results.mjs` | 从 maa-tools 的输出里逐组判定通过/失败，再按归属汇总成逐文件结论；`RESULT-FILE:` / `RESULT-CASE:` 行格式也在这里；`locateCaseFailures()` 把 `error_details.json` 的条目分发到具体用例下标 |
-| `lib/images.mjs` | 截图路径（与 `runTest` 内算法逐字一致）、存在性扫描、统计 |
-| `lib/png.mjs` | 读 PNG 头拿宽高 |
-| `lib/paths.mjs` | 相对仓库根解析路径、日志里显示相对路径 |
-| `lib/report.mjs` | 退出码映射与 `RESULT:` 行 |
-| `lib/maa-tools.mjs` | 加载 `@nekosu/maa-tools`：**优先**用仓库里的那份，包名解析只作兜底；返回本次实际加载的来源与版本 |
+| `files[].file` | 规范化绝对路径；扩展检查后转换为相对仓库路径显示 |
+| `name` | 测试文件组名，缺省为 null；错误条目可省略 |
+| `controllers`、`resources` | 源文件声明的控制器与资源，只用于显示；实际运行平台来自配置展开 |
+| `cases[].index` | 源文件原始下标，可能不连续，不能用返回数组的位置替代 |
+| `cases[].name`、`image`、`hits` | 用例说明、截图名、用于显示的期望节点名 |
+| `cases[].start`、`end` | 源文件字符范围，从 0 开始，end 不包含在范围内 |
+| `error` | 文件读取或结构错误，作为坏文件显示 |
 
-## 依赖策略：为什么不自带 maa-tools
+源码位置对应收集时的磁盘内容。编辑器有未保存修改时，不能假设旧位置仍准确；保存并重新收集后再跳转或运行。
 
-`@nekosu/maa-tools` **故意没有写进本仓库的 `package.json`**。插件和 runner 直接调它的函数（`loadConfig`、`runTest`），但加载的是**被测试仓库自己装的那一份**：
+## 运行结果
+
+`--jsonl` 最后记录的 `result` 和普通 `--json` 的整个文档都是完整 `TestRunResult`，包含以下字段：
 
 ```text
-<workspace>/node_modules/@nekosu/maa-tools/dist/index.mjs   ← 优先
-@nekosu/maa-tools（按包名解析）                              ← 兜底，仅用于脚本被搬到别处做实验
+schemaVersion: 1
+status: passed | failed | error | empty
+groups: TestGroupRunResult[]
+files: TestFileRunResult[]
+durationMs: number
+errorCode?: string
+reason?: string
 ```
 
-理由：
+`files[]` 由 maa-tools 统一汇总，是扩展显示文件和用例结论的依据。每个文件包含收集元数据、`selectedCases`、`verdict`、可选 `reason` 和 `cases`。`selectedCases` 是本次计划运行的原始下标；`cases` 必须完整覆盖该列表，不要求从 0 连续排列。
 
-1. **版本一致才能结论一致**。`maatools.config.mts` 是照仓库那份 maa-tools 写的（类型、`test.cases` 的返回结构、组名拼法、`imageRoot` 都由它决定），CI 里的 `pnpm test` 跑的也是那份。插件自带副本就可能出现「插件说通过、CI 说失败」。
-2. **它决定 MaaFW 版本**。`setupMaa` 用 `maaVersion: 'latest'` + `~/.maa-tools` 缓存，两份副本可能解析出不同的 MaaFW，识别结果就不可比。
-3. **省一份重复依赖**。它拖着 jiti / workerpool / maa-version-manager / maa-pipeline-manager 等一串包。
+每条文件用例包含收集元数据、`verdict`、`durationMs`、可选 `reason` 和 `platforms[]`。每个平台项含 `controller`、`resource`、`result`；平台结果给出检查明细、单个 `origin` 和结论。已解析图片路径时，`imagePath` 是实际绝对路径；尚未执行的 error 占位结果可以为空字符串，不能当成实际尝试过该路径。控制器及资源是组配置声明值，不是截图目录别名。
 
-代价：仓库依赖没装好时插件跑不起来（README 的前置条件里写了）。所以每次运行都会在日志第二行打出实际用的是哪一份、什么版本：
+`groups[]` 保留按配置分组的原始结果；无文件来源的全量库调用也可用这些组汇总状态，不能因 `files` 为空就判为空运行。扩展需要文件身份，不能把无来源组强行挂到某个文件。
 
-```text
-库：@nekosu/maa-tools 1.1.2（用仓库里的副本：node_modules/@nekosu/maa-tools/dist/index.mjs）
-```
+### 判定与验证是否完整
 
-排查「本地和 CI 不一致」时先看这一行。
+判定由 maa-tools 负责，扩展不从失败或缺图数组重新计算：
 
-## runner 命令行契约
-
-```text
-node runner/run-single-test.mjs \
-  --workspace <仓库根绝对路径> \
-  [--config <相对仓库根的 maatools 配置，默认 maatools.config.mts>] \
-  --file <测试 json> [--file <测试 json> ...] \
-  [--case <用例下标，从 0 开始>] \
-  [--dry-run]
-```
-
-- `--file` 可以重复：多个文件就是**批量跑**，一次进程跑完，省掉每个文件重新准备 MaaFW 的固定开销。
-- 不传 `--case`：跑目标文件里的全部用例；批量跑时不允许带 `--case`（下标含义会歧义）。
-- `--dry-run`：只解析、过滤、检查截图，打印计划；不加载 MaaFW、不执行识别。
-- stdout 是人话日志，随后是**逐用例结论** `RESULT-CASE: {json}`（只打失败和缺图跳过这两类，`verdict` 分别是 `fail` / `skipped`）、**逐文件结论** `RESULT-FILE: <相对路径> pass|fail|error`，**最后一行固定** `RESULT: pass|fail|error|empty`；退出码与最后一行一致。
-- 逐用例行 `RESULT-CASE` 的载荷是 `{"file","case","verdict","title","detail":[...]}`：`title` 是面板节点上显示的那一行短标题（例如 `CloudADB-官服 失败`），`detail` 是展开后逐条列出的明细（节点、原因、截图、哪些平台通过）。用 JSON 是因为原因里带空格、逗号和反引号。
-- 逐用例原因来自 maa-tools 写的 `cfg.test.errorDetailsPath`（MaaEnd 里是 `tests/maatools/error_details.json`）：条目含 `imagePath`、`node`、`hit`、`detail.{algorithm, box}`。**只有本次运行更新过这个文件才采信**（比 mtime），否则宁可没有原因，也不张冠李戴。
-- 运行日志里有一块「平台覆盖」：每个平台涉及多少张截图、缺几张，以及声明了却没有匹配到测试组的 controller（后者多半是 controller 名字写错或 loader 没映射）。缺图必须在日志里显式出现 —— 否则「跳过即通过」会被误读成没问题。
-- 逐文件结论怎么来的：`runTest` 只返回整批一个布尔值，所以跑的时候把 stdout 抄一份，按「组名行 = 该组开始、行首两空格 = 该组有失败明细」判定每组，再按 `owners`（组名 → 文件）分发到文件。相关纯函数都在 `lib/results.mjs`，有单测。
-- 文件级结论还会被两条规则覆盖成 `error`：该文件一张截图都不存在、或它在过滤后一个组都没匹配到 —— 这两种情况下「通过」是假的。
-- 脚本自己不做「静默降级」：缺少 `--workspace`/`--file`、配置文件加载失败、目标文件不存在、截图一张都不存在、MaaFW 起不来，全部按前置错误报出来。
-
-## 为什么一批文件合成一次进程
-
-`runTest` 的固定开销（配置加载、`setupMaa` 准备 MaaFW、加载 `assets/`）按进程算，跟跑了几个文件无关。实测本机（8 核、maa-tools 默认 2 个 worker）：
-
-| 场景 | 耗时 |
+| 层级 | 规则 |
 | --- | --- |
-| dry-run（只加载配置 + 过滤 + 检查截图，不跑识别） | 0.56 秒 |
-| 单个文件（2~3 条用例） | 4~5 秒 |
-| 10 个文件（Common/Button 全目录）批量 | 5.3 秒 |
-| 同 10 个文件逐个进程跑 | 约 45 秒 |
-| 全仓 47 个文件 / 1491 个识别任务，批量 | 与 `pnpm test` 同量级（同一批任务、同样 worker 数） |
+| 单平台用例 | 检查为 pass/fail，应返回却缺失节点结果也为 fail；缺图为 skipped；没有待检查节点或计划未能执行为 error |
+| 跨平台用例 | fail 优先，其次 error；有平台缺图则 skipped；其余为 pass |
+| 文件 | 有用例失败为 fail，其次 error；至少有一个平台完成有效检查且其余只是缺图跳过时可 pass；没有有效检查为 error |
+| 整批 | error 优先于 failed，再是 passed；没有匹配用例为 empty，错误代码为 `no-tests-matched` |
 
-所以逐文件起进程时，几十个文件里有 2~3 分钟是纯重复开销；合成一批后这份开销只付一次。代价是逐用例结论要靠解析输出和错误明细（见下一节），单条用例仍然单独起进程以保证精确。
+**用例标灰不等于它在所有平台都没运行。** 例如 A 平台已有有效检查并通过、B 平台缺图，该用例汇总为 skipped，文件可为 pass，同时列明 B 未验证。即使每条用例汇总都是 skipped，也不能只看这个值就断言文件“全缺图”；应直接用框架给出的文件结论。
 
-## 逐用例结论怎么产生
+预期命中和预期不命中的节点都必须返回识别结果。没有结果不能默认为未命中；识别无明细会报错。用例设置了期望框时，识别必须返回实际框，且实际框完整落在期望框内；未设置期望框的用例不做框检查。
 
-1. 跑的时候把 stdout 抄一份，按「组名行 = 该组开始、行首两个空格 = 该组有失败明细」判定每组通过与否（`attributeGroupResults()`）；
-2. 过滤阶段就记了 `owners`（组名 → 哪些文件），据此把组结论分发到文件（`aggregateFileResults()`）；
-3. 逐用例原因读 `error_details.json`（`imagePath`、`node`、`hit`、`detail.{algorithm, box}`），用「组的 `imageRoot` + 用例图片名」推期望路径去匹配条目，再用**用例自己写的期望**重判一遍（该命中没命中 / 不该命中却命中 / 框超出范围），并顺带统计这条用例在哪些平台跑过、哪些失败、哪些缺图（`locateCaseFailures()` + `formatCaseFailure()`）。
+扩展检查顶层格式、合法状态、必要字段、文件身份、`selectedCases` 与用例结果的覆盖关系，并对照面板传入的所选下标。缺项或不支持的格式明确报错，不把没返回的用例补成通过。TypeScript 接口只是本地类型说明，读取边界上的值仍需校验。
 
-只有本次运行确实更新过 `error_details.json` 才采信（比 mtime），否则宁可没有原因，也不张冠李戴。
+### 耗时
 
-## 退出码 → 扩展行为
+同组按规范化绝对截图路径复用识别任务。同图被多个所选用例使用时，真实任务耗时在这些用例间分摊，避免同图运行多次或重复累计。组时间等于组内用例时间之和；文件时间为对应所选用例各平台的时间之和。顶层 `durationMs` 是运行实际经过的时间，包含准备和等待，不与并行任务时间求和等同。
 
-| 退出码 | 来源 | `NodeTestRunner`（CodeLens / 命令） | `NodeTestExplorer`（测试面板） |
-| --- | --- | --- | --- |
-| `0` | 全部用例通过 / dry-run 有匹配 | 弹「通过」提示（dry-run 不弹） | 标记 passed |
-| `1` | 有用例断言失败 | 弹「失败」+「打开错误详情」按钮 | 标记 failed，提示看输出与 `error_details.json` |
-| `2` | 前置错误（参数、配置、截图全缺、MaaFW） | 弹「没能跑起来」+「查看输出」 | 标记 **errored**（不是 failed）；有逐用例失败行时仍按行标记 |
-| `3` | 过滤后没有可跑用例 | 弹「没有匹配到任何用例」+「查看输出」 | 标记 errored，提示查 loader 映射 |
-| `null` | 进程没起来或被杀 | 弹「没能跑起来」，提示查 `nodePath` | 标记 errored / skipped |
+### 中文失败信息
 
-`1` 和 `2` 必须分开：一个是用例真的不通过，一个是根本没跑起来，排查方向完全不同。
+`describeCheck()` 等显示函数把框架原因翻成中文：期望命中却未命中、不该命中却命中、识别框不符、缺少识别详情、缺失节点结果。原因、实际图片路径和期望框来自结果；不猜算法故障、不重新比较识别框、不读取旧错误文件。
 
-## 过滤规则
+## 运行中的即时结果
 
-`maa-tools` 的 `runTest` 只接受配置里的 `test.cases`，而 `fetchCases` 展开后每个组只剩 `configs` 和 `cases`，「来自哪个文件」的信息已经丢了，组名只带 `(controller-resource)name`。所以 `filterGroups()` 用四条一起收窄：
+所有扩展运行固定使用 `--jsonl`，子进程的 stdio 为 `ignore/pipe/pipe`。标准输出每行一个紧凑 JSON，并以换行结束；stderr 是人类日志。`RunFlowHandlers` 和 `TestProcessHandlers` 的可选 `onProgress` 只接收校验后的三类 `TestRunEvent`，不决定输出格式。
 
-1. `group.configs.controller` ∈ 目标文件声明的 controller；
-2. `group.configs.resource` ∈ 目标文件声明的 resource；
-3. 目标文件写了 `configs.name` 时，组名必须以 `)<name>` 结尾；
-4. 组内只保留「用例键在目标集合里」的用例，滤空的组整个丢掉。
+流中每条记录都带 `schemaVersion: 1`：
 
-第 4 条是关键：同一个 controller/resource 下往往有几十个测试文件，只靠 1～3 会顺带跑掉别人的用例。
-
-**已知边界**：两个文件若 controller、resource、`configs.name`、图片名和命中节点全都相同，就无法区分，两边都会保留（当前 MaaEnd 仓库实测无此冲突）。
-
-## 截图预检
-
-路径算法必须与 `runTest` 内一致，否则会出现「预检说存在、maa-tools 说 not exists」：
-
-```text
-path.resolve(cfg.cwd, cfg.test.casesCwd, group.configs.imageRoot ?? '.', case.image)
-```
-
-- 全部缺失 → 退出码 2（否则 maa-tools 会把所有用例跳过并判通过，假阳性）。
-- 部分缺失 → 打警告后继续跑（maa-tools 自己的行为，我们改不了它的判定）。
-
-## hover 文本格式
-
-```text
-**帝江号_大世界.png** · 在 `tests/MaaEndTestset` 下找到 3 张（共 3 个平台/资源组合） · 本文件声明平台：Win32、ADB
-
-**ADB / Official_CN** · 1280×720 · [打开原图](file:///…)
-<img src="file:///…" alt="ADB / Official_CN" width="400" height="225">
-
-**CloudADB / Official_CN** · 缺失
-```
-
-- 平台/资源组合来自扫描 `maaNodeTest.testsetDir`，不写死；
-- **顺序按本文件 `configs.controller` 声明来**（`orderLocations()`）：扫描顺序是目录名字母序（ADB、CloudADB、Win32），跟文件里写的平台顺序对不上，看的时候容易串行；没声明的平台按扫描顺序接在后面，别名先经 `controllerDirs` 换成目录名再排名次；
-- 行尾两个空格是 Markdown 硬换行，让图片紧跟描述；
-- 一个都没找到时只给一句人话提示（「没有任何平台包含 xxx.png…」），不铺空表格；
-- URI 里的括号要转义成 `%28`/`%29`，否则文件名带括号时链接会断。
-- **图片用 `<img>` 才能控制尺寸**：Markdown 图片语法没法指定大小，1280×720 会按原样铺开，占掉大半个悬浮框。宽度取 `maaNodeTest.hoverImageWidth`（默认 400），高度按 PNG 原比例算（读不出尺寸就不写 `height`）。用 HTML 的前提是 provider 里 `MarkdownString.supportHtml = true`，这个已经设了。
-- **声明了但扫描不到的平台要单独写出**：扫描只列存在的平台目录，本文件 `configs.controller` 里有、测试集里没有的，会补一行「`<testsetDir>` 下没有这个平台的目录」。名字对不上（loader 里的映射和目录名不同）也会落到这一行，这是有意的：宁可多一句提示，也不要静默忽略。
-- 把宽度设成 `0` 会回落到 `![](uri)` 的 Markdown 语法 —— 这是留给「某天 HTML 渲染出问题」的开关，别删。
-
-## 测试面板语义
-
-- **发现**：`findFiles` 扫 `test_*.json` 与 `test_*.jsonc`，按 `isTestFilePath()` 过滤；按相对路径排序后用 `folderSegments()` 建「目录 → 文件 → 用例」三层树（`tests` 这层省略，目录节点只有名字、不写灰字）。JSON 坏掉的跳过并 `console.warn`，不影响整个面板。保存文件后 300ms 防抖刷新。
-- **控制器显示名是 `Maa Node Test`**（`createTestController("maaNodeTest", "Maa Node Test")`），和 `package.json` 的 `displayName` 是同一个字符串：用户在测试面板看到这行名字时，要能拿着它去扩展列表里对号。面板里的灰字、命令分类、输出面板保持中文——灰字里混着用户自己测试文件里的中文组名，翻成英文只会更难读。
-- **每行灰字只放「不重复、不数数」的信息**（`core/testExplorer.ts` 的 `describeFileDescription` / `describeCaseDescription`）：文件行是「测试组名 · 平台/资源矩阵」，用例行是「图片名 · 命中 N 个节点 / 负例（不该命中）」。两条都是踩过的取舍 —— 目录行和文件行不写用例/文件数量（展开就能看见，凑长了只会被截断）；用例标题已经等于图片名（没写 `name`）时灰字不再重复一遍图片名。加新信息前先问「这行是不是已经有同样的字、这个数是不是非得在这看」。
-- **目录节点靠 id 找，不另建表**：`addTestFile()` 每进来一个文件就沿 `folderSegments()` 走一层，用 `parent.get("maaNodeTest#dir:<层级路径>")` 决定是复用还是新建；目录 id 只由层级路径决定，所以不需要 `Map` 缓存。
-- **探测阶段就报缺图**（`reportMissingImages()` + `core/missingImages.ts`）：刷新时对每个用例算「本文件声明的平台里，哪些没有这张截图」，然后（1）在 `image` 值上画 Warning 级诊断（`DiagnosticCollection("maaNodeTest")`），（2）把「缺 ADB、CloudADB 截图」拼进用例节点的 description。这样写用例的时候就知道声明了却没截图，不用等跑完 —— 跑完 maa-tools 会把缺图的用例当通过。整个扫描对 48 个测试文件实测约 60ms（同一图片名的扫描结果按名字缓存），可以放心跟着刷新走。
-- 缺图诊断只判断「某些声明平台没有这张图」，不做资源服（`Official_CN` 之类）的匹配 —— 测试集的一级目录是平台，二级目录是资源，而用例声明的 `configs.resource` 是显示名（`官服`），两者没有对应关系可依赖。
-- **节点的身份**：每个叶子节点（文件、用例）登记在 `leaves: Map<id, {filePath, relativePath, caseIndex?}>` 里，运行时只认这张表，不靠解析 id 字符串 —— 目录节点因此不需要挂 uri，也不会被误当成可运行的东西。
-- **运行**：`collectTargets()` 递归遍历选中的节点 —— 没有 `include`（Run All）时取全部叶子；目录节点展开成它下面所有文件；文件节点就是它自己；用例节点只跑那一条。同一文件既有整文件又有单用例时，整文件优先去重。结果分成两类：**文件级目标合成一次进程**（解析 `RESULT-FILE` 行逐文件标记），**用例级目标各自一次进程**（退出码即结论）。
-- **串行**：多个目标用一个 promise 队列逐个跑，避免同时起一堆 MaaFW。
-- **取消**：`CancellationToken` → `process.cancel()`，被取消的标 skipped。
-- **结果标记**：文件节点用 `**短标题**` + Markdown 列表（明细来自 `RESULT-CASE`）；有逐用例信息时子用例各按自己的结论标记，没被点名的按通过处理；一条逐用例信息都没有时，子用例跟随文件结论。
-- **缺图 = 跳过，不是失败**：声明的平台缺图时 maa-tools 会跳过该用例并判通过，文件也就没有断言失败。标记规则抽成 `core/testResult.ts` 的 `planFileMarking()`：这类用例在面板里标成 `skipped`（灰的），文件仍然通过，但文件节点的提示里写明「N 条用例没有验证到（缺图跳过，不算失败，补图后重跑即可）」+ 逐条列出，测试输出末尾的结果块里也会列一遍。这样来不及补图时不会把整次运行染红，也不会让人误以为每条用例都验证过了。
-- 用例结论因此比文件多一种取值：`pass | fail | error | skipped`（`CaseOutcome`）。runner 侧由 `runner/lib/results.mjs` 的 `caseOutcome(info)` 判定：有失败报 `fail`，只有缺图报 `skipped`；扩展侧 `collectCaseVerdict()` 认得这四个值。
-- **测试输出分两段**：`appendOutput` 先把 runner 的原始 stdout 原样转发（前面一条分隔线 `RAW_LOG_BANNER`），跑完再往末尾贴一块结果（`core/runSummary.ts` 的 `buildRunSummary()`）—— 结论一行、文件/用例计数、耗时，然后只列失败 / 没跑起来 / 缺图跳过的用例，通过的不逐条刷。原始日志不能删（排错全靠它），所以做法是「补一块结构化的摘要」而不是过滤日志。结果块挂在本次运行的锚点节点上（批量跑时是第一个目标），单跑一条用例时形状相同。
-- **单条用例运行**：各自一次进程，退出码即结论，失败文案同样优先用 `RESULT-CASE` 给的原因。
-
-## 换一个仓库来用要改什么
-
-插件的机制是通用的（`maa-tools` 的节点测试），默认值是 MaaEnd 的。换到别的仓库一般只改设置：
-
-| 设置 | MaaEnd 的值 | 换仓库时 |
+| type | 其他字段 | 含义 |
 | --- | --- | --- |
-| `maaNodeTest.configPath` | `maatools.config.mts` | `maa-tools` 的默认约定，通常不用改 |
-| `maaNodeTest.testsetDir` | `tests/MaaEndTestset` | 指到那个仓库的测试集目录 |
+| `case-started` | `origin` | 第一次提交该原始用例相关识别任务，跨平台只开始一次 |
+| `case-result` | `origin`、`result` | 本次实际计划的全部平台完成；result 是仅含该文件这一条原始下标的完整 TestRunResult 快照 |
+| `file-result` | `file`、`result` | 文件所有 selectedCases 都有确定结果；快照只含该文件的本次选择范围 |
+| `run-result` | `result` | 唯一且最后，包含完整 TestRunResult；由运行入口处理，不传给面板的进度回调 |
 
-如果那个仓库的 `tests/scripts/loader.mts` 用了别的组名拼法（不是 `(controller-resource)name`）或者 `imageRoot` 不是 `controller/resource`，`runner/lib/filter.mjs` 的收窄条件要跟着改 —— 这是本项目唯一「贴着 MaaEnd 写」的地方。
+框架在每张图的全部节点块完成后立即判定，同图复用用例分别比较自己的期望；来源的最后一个计划平台结束后才发用例结果。缺图、无节点等可以直接完成，不伪造识别开始；尚未形成计划的配置错误仅由最终结果说明。资源组和测试组仍按计划处理，组内识别任务并行，不改成逐文件进程。
 
-## 设置项
+快照的 groups 同样限定在对应范围，并复用最终报告的汇总规则。用例快照按单文件、单原始下标校验；文件快照按该文件的 expectedCases 校验。记录还检查版本、类型、请求来源、原始下标和快照身份，未经校验的标准输出记录不能直接交给面板。
 
-| 设置 | 默认 | 用途 |
-| --- | --- | --- |
-| `maaNodeTest.nodePath` | `node` | 跑测试的 node，要求 22+ |
-| `maaNodeTest.configPath` | `maatools.config.mts` | 认定仓库根；runner 的 `--config` |
-| `maaNodeTest.testsetDir` | `tests/MaaEndTestset` | hover 扫描截图的根目录 |
+`RunProgress` 保存已开始和已完成事实，相同重复消息不再发布，包括完成后重复收到已记录的开始消息。重复结果矛盾、此前未报告开始却在完成后首次报告开始、文件结果遗漏已开始或已完成用例都报协议错误。平台返回顺序不影响比较，但来源、元数据、结论、检查和识别耗时必须一致。
 
-## 补全
+最终结果先通过完整协议校验，再核对已完成的用例与文件；未收到完成事件的项目由最终结果补全。核对对应范围的实际事实，不比较快照的整批状态和实际经过时间与整批最终值是否相同。
 
-- **数据来源全是仓库自己的**：`controller` / `resource` 取自 `tests/scripts/loader.mts` 的映射表（不写死名字，`Win32-Front` 这种别名也会出现，detail 里标出它对应哪个截图目录）；`image` 取测试集里真实存在的 png，按本文件 `configs.controller` 换算成目录后收窄；`hits`（含 `{node: ...}` 写法）取 pipeline 里的节点名，**只算本文件声明的控制器会加载的资源目录**（见下一节）。
-- **判断光标在哪一层用 `jsonc-parser` 的 `getLocation`**，别自己扫文本。有个坑：**在写键时它会把「已经敲进去的半截键名」当成最后一个路径段**（`{"configs": {` → `['configs','']`），所以 `completionContextAt()` 在 `atKey` 时 `path.pop()` 一次，路径才是「光标所在的那个对象」。
-- **拿不准就不给候选**：`name`、`imageRoot`、`box` 这些没有可枚举取值的字段返回空数组，宁可不弹也别给错的值。
-- **插入文本看上下文**：光标已经在字符串里（`inString`）就只插内容，否则连引号一起插。
-- **缓存**：loader 映射按 mtime 缓存；截图列表按各平台目录 mtime 合成戳；节点索引懒加载、缓存 10 秒，并且**按文件 mtime 增量重建** —— 421 个 pipeline 文件首次约 340ms（6082 个节点），文件都没改时重建只要 6ms。不触发补全就不会扫。
-- **节点注释照参考实现（maa-support-extension）的做法**：补全候选只带节点名，`resolveCompletionItem` 展开时才去查注释（`documentation = desc + Reco/Act + 定义位置`），不给 6082 个候选预先拼字符串。
-- **别名一致性**：`loaderMaps.resolveControllerDir()` 是唯一的换名入口，缺图检查和悬浮也走它 —— 否则 `Win32-Front` 会被误报成「测试集里没有这个平台的目录」。
-- **loader 解析用正则**：只取两个对象字面量的键值，注释掉的条目要剔除（loader 里常用注释占位）。别为了 4KB 文件引入 TypeScript 解析器。
+取消时只返回已经校验的完成事实：完整文件快照可结束文件，只有单条快照不能说整个文件完成；尚未完成项由面板标 skipped。信号终止等非协议错误也可保留已校验事实，但不能据此判整批通过。
 
-## 节点名扫哪些目录
+标准输出按 UTF-8 解码并按换行缓冲，支持中文、Windows 换行（CRLF）、一块多行和大行，不能逐个 data 块直接 JSON.parse。完整畸形行、未知记录、重复 `run-result` 或其后再有记录立即按 `invalid-result` 处理；正常退出时，缺少最后报告或残留截断行也报错。
 
-- **只扫本文件声明的控制器会加载的资源**：`assets/interface.json` 的 `controller[].attach_resource_path` 给出了映射（MaaEnd 里 `ADB` → `./resource_adb`，`CloudADB` → `./resource_adb` + `./resource_cloud_adb`）。基础资源 `assets/resource` 总是要扫；
-- 例：测试文件声明 `["Win32"]` 时候选 6082 个节点（只有 `resource` 那 421 个文件），声明 `["ADB"]` 时 6098 个（多出 `resource_adb` 的 118 个文件）；`AutoCollectClick` 在 ADB 下有两处定义（基础 + `resource_adb` 覆盖），在 Win32 下只有一处；
-- **声明了但映射里查不到的控制器**（`Win32` 在 interface.json 里叫 `Win32-Front`）只加基础资源，不会瞎猜；
-- **没有 `interface.json`** 时退回「扫 `assets` 下所有 `pipeline` 目录」，别让补全悄悄变空；
-- 平台覆盖目录里的节点大多是在改别的平台的行为，混进来既吵又容易选错 —— 这也是不扫全部的原因；
-- **后台预热**：建一次节点索引要读几百个 pipeline 文件（约 350ms），不预热的话「第一次在 `hits` 里补全 / 打开带 hits 的文件 / 悬浮节点名」都会卡这么一下。所以 `refresh()` 发现测试文件后，把它们声明的控制器组合交给 `extension.ts` 的 `scheduleWarm()`：激活后延迟 1.2 秒起，每 200ms 预热一个 scope（按文件数/出现次数排序）。实测冷 341ms → 预热后 3~5ms；
-- 缓存分三层：文件清单按「控制器组合」缓存、资源目录清单（walk `assets` 找 `pipeline`）缓存 10 秒、单文件解析结果按 mtime 复用。实测基础资源首次 346ms，换一个控制器组合再建只要 5~12ms（只解析新增的那几十个文件）；预热之后用户侧的补全、内联提示首次都在 3~8ms。
+用户取消或信号终止时，尚未完成的末行不覆盖已经校验的完成事实；此前完整行的协议错误仍优先。格式错误或最终对账矛盾会清除可疑的即时通过，同一次调用的所选节点改标 error。
 
-预热的代价与边界：一次预热总共约 0.5 秒 CPU，分摊在启动后几秒里；单个 scope 的解析是同步的（最长约 350ms），所以第一次预热排在激活后 1.2 秒，避开界面刚起来的时刻；`deactivate()` 会清掉定时器；预热失败一律吞掉，下次操作时现建。
+## 面板与运行操作
 
-## 节点注释与跳转
+- 收集结果通过 `core/testExplorer.ts` 生成目录、文件和用例；源码位置由字符偏移转换为行列。坏文件保留读取错误，运行时单独标 error，正常文件继续。
+- 叶子信息表记录绝对路径、相对显示路径和原始下标。运行时使用这张表，不解析节点 id 来找测试。
+- 没有排除项的文件目标合并为一批，节省重复准备。单条目标各自调用；排除个别用例时，把文件展开为其余所选原始下标，不能仍提交整文件。
+- 一次面板运行中的目标依次执行。所选项先标 enqueued；case-started 才标该用例及文件运行中；case-result 立即结束用例，file-result 立即结束文件并补此前未逐条报告的子用例。最终报告只补未完成项，不把已完成项重新标为 started。
+- 取消请求传给共用运行入口并终止 maa-tools 子进程。面板保留已校验完成的用例和文件，未完成项标 skipped；摘要仍只显示取消与耗时，不给部分运行作整批判断。跨平台的子进程退出行为需要分别验证。
+- `caseInfoToVerdict()` 使用上游 verdict，只转换中文消息和耗时。`planFileMarking()` 不把无结果的子节点标通过，也不重新覆盖正确的文件判定。
+- 摘要统计明确的 pass、fail、error、skipped；缺少结果单列。前置错误不能显示“全部通过”。合法的整批 error 可以保留已经完成的通过/失败结果，但另列“运行错误”并说明整批没通过；格式或完整性不符合要求时，不把不可信的部分结果算通过。原始日志在前、摘要在后；“没有完成验证”与“断言失败”分开表达。
+- 并发刷新仅应用最新一次收集；停用后迟到的收集不再操作已销毁的面板。
 
-`hits` 里的节点名有三处能力，数据都来自 `core/pipeline.ts` 解析出的节点索引：
+## 编辑辅助的范围
 
-| 场景 | 表现 | 实现 |
-| --- | --- | --- |
-| 内联提示 | 节点名后面贴一句 `desc`（压成一行、最多 32 字），点一下跳到定义 | `providers/inlayHints.ts`，只处理可见范围内的 | 
-| 补全（展开候选） | `desc` + `Reco: X · Act: Y` + `定义在 \`path:line\`` | `resolveCompletionItem` 懒填 |
-| 悬浮节点名 | 名称 + `path:line`，`desc`、Reco/Act，**节点源码 JSON 片段**（超过 40 行截断） | `providers/hover.ts` 的 `nodeHover()` |
-| Ctrl+Click / F12 | 跳到节点名在 pipeline 文件里的位置 | `providers/inlayHints.ts` | `hits` 节点名后面的注释（`desc`），点击跳定义 |
-| `providers/definition.ts` |
+`core/document.ts`、`hits.ts` 和 `completion.ts` 解析编辑器文本，允许宽松处理注释和未完成内容。maa-tools 读取运行文件时允许注释，不允许尾逗号；两者用途不同，不宣称解析行为完全相同。
 
-- 节点相关的三种能力只认 `cases[n].hits[m]` 和 `cases[n].hits[m].node` 这两个路径（`isHitsEntryPath()`），在 `name` 里点到同名文字不跳也不弹；
-- `image` 字段的跳转走另一条路：`findImageFieldAt()` 认出光标在键或值上，`locateImage()` 扫全平台，`orderImageLocations()` 按声明的平台顺序排好（别名先经 `resolveControllerDir()` 换成目录名），**全部返回**；
-- **多结果一律返回列表**（`provideDefinition` 返回数组），VS Code 会弹 peek 让人挑。理由是实际使用中「某个平台的图有问题，只想进那张看」很常见，直接挑比先跳默认平台再翻要快；列表顺序和悬浮预览用的是同一个 `orderImageLocations()`，两处顺序不会打架；
-- 节点名写错时：悬浮说「pipeline 里没有这个节点」，跳转给空；
-- 识别/动作的取值要兼容两种写法：字符串（`"recognition": "TemplateMatch"`）和对象（`{"type": "TemplateMatch"}`），没写就退回 `custom_recognition` / `custom_action`；
-- 源码片段按 `keyOffset` 到 `endOffset` 从原文截，所以悬浮里看到的就是 pipeline 里真实的那一段，不是重新序列化的结果；
-- 内联提示的开关是 `maaNodeTest.hitsInlayHints`（默认开）。位置取节点名字符串的末尾，紧跟原文；目标文件位置按索引里的行号算，点击用 `vscode.open` + `selection`，不需要先打开目标文件；
-- 内联提示只对**能解析出 `desc` / `focus` / 识别方式**的节点出现，也只在 `hits` 里出现，写错的节点名不提示（免得满屏噪音）；
-- 悬停里的图片、节点合并结果这些参考实现有的东西**没做** —— 那是给 pipeline 编辑器看的，节点测试只需要「这是哪个节点、它想识别什么」。
+图片预览和黄线根据 `testsetDir` 扫描一级平台、二级资源目录；`loaderMaps.ts` 只读 `tests/scripts/loader.mts` 中 `controllerMap`、`resourceMap` 的对象字面量字符串。它不是 TypeScript 求值器，也不执行 loader。缺图诊断只比较声明控制器是否有图，不核对资源服；带子目录的 image、自定义 imageRoot 或动态映射可能与实际运行不同。
 
-## 单测地图
+因此，运行缺图信息必须使用返回的 `imagePath`，排错应检查配置里的 `cwd`、`casesCwd`、`imageRoot` 和用例 `image`。工作区根不一定是截图根；改变编辑辅助的 `testsetDir` 不改变运行路径。
 
-| 单测 | 覆盖 |
-| --- | --- |
-| `src/core/document.test.ts` | 解析真实形态（注释、尾逗号）、offset 切片、configs 两种写法、image 键/值命中、坏 JSON |
-| `src/core/testset.test.ts` | 平台/资源扫描、按平台找图、PNG 尺寸、目录不存在 |
-| `src/core/hover.test.ts` | hover 命中/缺失/测试集不存在/无平台目录 |
-| `src/core/lens.test.ts` | CodeLens 条数与命令参数 |
-| `src/core/runnerArgs.test.ts` | 参数拼装（有/无 `--case`、`--dry-run`）、命令行转义、标题 |
-| `src/core/testExplorer.test.ts` | 测试面板节点 label 回退、id 稳定、range 覆盖用例对象 |
-| `src/core/testResult.test.ts` | 结论行解析、坏载荷、退出码映射、文件/用例文案、Markdown 列表 |
-| `src/core/runSummary.test.ts` | 结果块的结论措辞、文件/用例计数、失败与缺图分段、取消、耗时格式 |
-| `runner/lib/*.test.mjs` | 用例键、过滤四条规则（含批量归属）、参数非法输入、`--case` 越界、截图路径与统计、PNG、RESULT 映射、逐用例失败分类与平台统计 |
+预览按声明控制器顺序排序，未声明平台接在后面。默认使用 HTML 图片，宽度 400、按比例设置高度，并启用 `MarkdownString.supportHtml`；宽度设 0 时使用原图尺寸。始终保留打开原图链接；文件 URI 中的括号应编码。
 
-## 目录结构
+节点候选按 `assets/interface.json` 中的控制器资源目录约定收窄，包含基础 `assets/resource`；缺少 interface 时退回扫描 `assets` 中的 pipeline 目录。节点注释取 `desc`、`focus` 和识别/动作说明。只在 `cases[].hits[]` 或其 `.node` 上提供节点跳转与提示；多处定义返回列表，源码片段从原文截取。
 
-```text
-maa-node-test/
-├─ package.json          # 扩展清单：命令、设置项、激活事件
-├─ icon.png              # 扩展图标（512×512），取自 MaaEnd 仓库 assets/locales/MaaEnd-Tiny.png
-├─ tsconfig.json
-├─ src/
-│  ├─ extension.ts       # 只做装配：输出面板、provider、命令
-│  ├─ config.ts          # 读设置、解析仓库根
-│  ├─ runner.ts          # 起 runner 进程、收输出、按退出码提示
-│  ├─ testing.ts         # 测试面板：发现用例、运行、结果标记
-│  ├─ providers/         # CodeLens 与 hover 的薄适配层
-│  └─ core/              # 纯函数：解析测试文件、扫截图、拼 hover 文本、拼参数、解析结论行
-└─ runner/
-   ├─ run-single-test.mjs # 入口：一批文件或其中一条用例
-   └─ lib/                # 参数、用例键、过滤、结果判定、截图预检、PNG 尺寸、退出码
-```
+`repoIndex.ts` 按文件修改时间缓存解析结果，按控制器组合缓存资源和节点清单；扩展可后台预热，停用时清理定时器。缓存只改善编辑辅助，不成为测试结果来源。新增缓存应先说明失效条件，不把某次本机速度写成保证。
 
-`src/core/` 不 import `vscode`，所以能直接在 Node 里跑单测；`runner/` 是独立的 ESM 脚本，不依赖插件进程，也能在终端里手动跑。
+## 验证
 
-## 自查命令
+命令和分工见 [AGENTS](../../../AGENTS.md#构建与验证)。框架测试负责来源、配置展开、选择不改变检查语义、识别判定和汇总；扩展测试负责参数、边界校验、缺项错误、结果转换、面板排除、标记和计数。文案或接口变化同步对应测试，不用固定的测试数代替覆盖说明。
 
-```bash
-pnpm run check        # 类型检查（tsc --noEmit）
-pnpm run compile      # 编译到 out/
-pnpm test             # 扩展纯函数单测
-pnpm run test:runner  # runner 单测
-pnpm run test:all     # 上面三件事一起
-```
-
-格式化沿用 MaaEnd 仓库的 prettier 配置（本仓库不重复写一份）：
-
-```bash
-~/dev/MaaEnd/node_modules/.bin/prettier --config ~/dev/MaaEnd/.prettierrc.mjs \
-  --write "package.json" "tsconfig.json" ".vscode/*.json" "src/**/*.ts" "runner/**/*.mjs"
-~/dev/MaaEnd/node_modules/.bin/markdownlint .
-```
-
-`maa-node-test.code-workspace` 刻意排除在格式化之外（`.prettierignore` 里有说明）：它是纯 JSON，不能带尾逗号。
-
-手动在终端里跑（不加载 MaaFW，几秒出结果）：
-
-```bash
-node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
-  --file tests/Common/Button/test_close_button.json --dry-run
-```
-
-真实跑一条用例，或者批量跑一个目录：
-
-```bash
-node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
-  --file tests/DeliveryJobs/test_region.json --case 0
-
-node runner/run-single-test.mjs --workspace ~/dev/MaaEnd \
-  --file tests/Common/Button/test_close_button.json \
-  --file tests/Common/Button/test_change_region_button.json
-```
+在被测仓库终端运行收集与指定用例命令可验证框架。要验证扩展编排，可调用构建后的 `startRunFlow`；验证 VS Code 操作仍需打开以被测仓库为工作区的调试窗口。不要把一条特定截图的识别时间当作所有机器的期望。
 
 ## 构建与发布
 
-### 为什么要用 esbuild 打包
+### 打包
 
-发布前必须把扩展和 runner 各自打成一个文件，原因是 vsce 的工作方式：
+`pnpm run build` 编译到 `out/` 并由 `scripts/bundle.mjs` 生成唯一运行产物 `dist/extension.js`。扩展入口为 CommonJS，`vscode` 不打包，`jsonc-parser` 等运行依赖打进产物；使用 `mainFields: ["module", "main"]` 以避免 jsonc-parser 的 UMD 懒加载文件缺失。
 
-1. vsce 判断「要带哪些生产依赖」靠的是 `npm list`。仓库用 pnpm，`node_modules` 是软链接树，`npm list` 会报一堆 missing（`math-intrinsics`、`dunder-proto` 之类），打包直接失败；换 `--no-dependencies` 又不会把依赖放进包，装到 VS Code 里就会 `Cannot find module 'jsonc-parser'`。
-2. 把运行时依赖打进 `dist/` 之后，`package.json` 里没有 `dependencies`，vsce 不需要解析依赖，包也更小。
-
-两个产物（`scripts/bundle.mjs`）：
-
-| 产物 | 格式 | 说明 |
-| --- | --- | --- |
-| `dist/extension.js` | CommonJS | 扩展入口，`package.json` 的 `main` 指向它；`vscode` 必须 external |
-| `dist/run-single-test.mjs` | ESM | runner 入口，扩展 spawn 的就是它；终端里也能直接跑 |
-
-两个容易踩的点：
-
-- **`jsonc-parser` 必须用 esm 版**：它的 umd 版在运行期 `require("./impl/xxx")` 懒加载，打不进包，会报 `Cannot find module './impl/format'`。所以 bundle 里设了 `mainFields: ["module", "main"]`。
-- **runner 是 ESM 且有顶层 await**，不能改成 CommonJS。
-
-顺带记一笔：rolldown 1.2.15 实测同样会踩 `jsonc-parser` 的 umd 坑，产物大小和构建时间与 esbuild 基本一致（我们这两个入口，esbuild 约 15ms / 79KB + 69KB，rolldown 约 40ms / 79KB + 70KB）。它擅长的是多入口拆包、Rollup 插件生态、生成 .d.ts，这些我们目前都用不到，所以先留在 esbuild。
-
-### VSIX 里有什么
-
-`.vscodeignore` 只留五类东西：`package.json`、`README.md`、`icon.png`、`LICENSE`（vsce 会改名成 `LICENSE.txt`）、`dist/**`。`src/`、`out/`、`runner/`、`scripts/`、`.github/`、`.agents/`、`pnpm-workspace.yaml` 都不进包。打出来的包约 236KB、10 个文件，解包后**没有 node_modules**也能跑（已验证：从解包目录直接执行 `dist/run-single-test.mjs` 正常）。
-
-### 本地怎么打包
+pnpm 的依赖布局可能让 vsce 调用 `npm list` 时解析失败，因此不让 vsce 收集生产依赖。VSIX 包含扩展清单、README、图标、许可证和 `dist`；源码、单测和被测仓库依赖不放进包。`dist`、`out`、VSIX 不提交。
 
 ```bash
-pnpm run build      # tsc 编译到 out/（单测用） + esbuild 打包到 dist/
-pnpm run package    # 打 VSIX 到 dist/maa-node-test-<版本>.vsix
-code --install-extension dist/maa-node-test-0.1.0.vsix
-```
-
-`pnpm run package` 会自动先跑 `vscode:prepublish`（= `pnpm run build`）。`.vsix` 和 `dist/` 都在 `.gitignore` 里。
-
-### CI 工作流
-
-| 工作流 | 触发 | 做什么 |
-| --- | --- | --- |
-| `.github/workflows/test.yml` | push / PR 到 `main` | `pnpm install --frozen-lockfile` → 类型检查 → 两个单测套件 → 试打包 VSIX → 上传 artifact |
-| `.github/workflows/release.yml` | 手动触发（`workflow_dispatch`，选 `main`） | 确认在 `main` 的最新提交上运行 → 读 `package.json` 的版本号并检查同名标签是否已被占用 → 类型检查 + 单测 → `pnpm run package` 打出 VSIX → 用 `gh api` 打 `v<版本>` 标签 → 用 `gh release create` 建 Release 附 vsix → `vsce publish` 发 Marketplace → （可选）`ovsx publish` 发 Open VSX |
-
-发布用官方的 `vsce` / `ovsx` 直发，不依赖第三方 action，仓库里**不存任何长期密钥**：
-
-| 目标 | 鉴权方式 |
-| --- | --- |
-| Visual Studio Marketplace | Trusted Publishing：`vsce publish --oidc`。GitHub Actions 申请短时效 OIDC token（靠 `permissions: id-token: write`），vsce 拿它向 `POST /_apis/gallery/token` 换 15 分钟会话 token |
-| Open VSX | `ovsx` 自己的 token，走 `OVSX_PAT` 环境变量；跟 Azure DevOps 的 PAT 退役无关 |
-
-GitHub Release 那一步**刻意排在发布市场之前**：只要测试和打包通过就会执行，把 vsix 挂上去。这样市场那边发不出去（例如 Trusted Publishing 还没上线）时，版本包照样能下载，可以走网页手动上传。
-
-**Trusted Publishing 的启用前提**（缺一条都发不出去）：
-
-1. 在 <https://marketplace.visualstudio.com/manage> 的 publisher 页面建一条 Trusted Publishing 策略，指明允许 `he0119/maa-node-test` 的 `release.yml` 发布。**这个页面 2026-10 还没上线**，官方在 [vsmarketplace#1422](https://github.com/microsoft/vsmarketplace/issues/1422) 里说目标是 2026-10-30，在此之前 `POST /_apis/gallery/token` 会返回 `TrustedPublishingNotSupportedException`；
-2. workflow 的 `permissions` 里有 `id-token: write`（已配）。
-
-页面还没上线时，发版这样处理：CI 照样打出 vsix 并建 Release，然后从 Release 页面下载 vsix，到 <https://marketplace.visualstudio.com/manage> 网页手动上传（网页上传走浏览器登录，不受 PAT 退役影响）。
-
-两种情况的本地验证（都在 GitHub Actions 之外跑，验证参数拼得对）：
-
-```bash
+pnpm run build
 pnpm run package
-pnpm exec vsce publish --packagePath dist/*.vsix --oidc --skip-duplicate   # 预期：No supported OIDC provider was detected
-GITHUB_ACTIONS=true pnpm exec vsce publish --packagePath dist/*.vsix --oidc --skip-duplicate
-    # 预期：提示 Add `permissions: id-token: write`，说明 OIDC 分支被正确触发
-OVSX_PAT=fake pnpm dlx ovsx@1.3.0 publish dist/*.vsix --skip-duplicate      # 预期：Invalid access token
+code --install-extension dist/maa-node-test-<版本>.vsix
 ```
 
-需要的 secret 只剩一个：
+`package` 会触发 `vscode:prepublish` 再构建。改源码后要重新构建，开发时可用 watch；`.code-workspace` 保持纯 JSON，不参与会添加尾逗号的格式化。
 
-| secret | 用途 | 不给会怎样 |
-| --- | --- | --- |
-| `OPEN_VSX_TOKEN` | 发布到 Open VSX（VSCodium 用户） | 那一步自动跳过 |
+### 自动检查与发布工作流
 
-### 发版步骤
+- `test.yml`：向 main 推送或提 PR 时安装依赖、类型检查、构建和测试、试打包 VSIX，再上传产物。
+- `release.yml`：手动从 main 触发，确认该提交仍为 main 最新提交，读取扩展版本，检查标签是否可用，再检查、测试和打包。
+- 发布工作流创建 `v<版本>` 标签、建立 GitHub Release 并上传 VSIX，随后发布 Marketplace 和可选的 Open VSX。标签已指向同一提交时可重跑；同名标签指向其他提交时要求更新版本，不能移动已发布标签。
 
-`main` 上有 ruleset（要求走 PR、线性历史、`test` 检查通过），所以**版本号改动也得走 PR**；
-标签由工作流自己打，本地不用 `git tag`。
+使用 `GITHUB_TOKEN` 创建的标签不会再触发其他工作流，所以建标签与发布在同一次手动运行中完成。版本更新本身也通过 PR，不直接向默认分支提交。
 
-```bash
-# 1. 版本号 PR
-git checkout main && git pull
-git checkout -b chore/bump-0.1.1
-pnpm version patch --no-git-tag-version    # 只改 package.json，不提交也不打标签
-git commit -am "chore: 版本号改成 0.1.1"
-git push -u origin chore/bump-0.1.1
-gh pr create --base main --title "chore: 版本号改成 0.1.1" --body "…"
+Marketplace 使用 `vsce publish --oidc`，需要 publisher 的 Trusted Publishing 策略和工作流的 `id-token: write` 权限。Open VSX 使用仓库 secret `OPEN_VSX_TOKEN`，未配置时跳过。不要把密钥写进源码。
 
-# 2. 合进 main（规则要求线性历史，只能 squash 或 rebase）
-gh pr merge <PR 号> --squash
+GitHub Release 在发布市场之前创建：市场鉴权不可用或策略尚未配置时，仍可下载已生成的 VSIX，排查后重跑，或由维护者手动上传。是否支持某项发布功能应以当前服务响应为准，不把历史预计上线日期写成长期前提。
 
-# 3. 手动触发发布（工作流负责打标签、建 Release、发市场）
-gh workflow run release.yml --ref main
-gh run watch
-```
-
-为什么不是「推标签触发」：用 `GITHUB_TOKEN` 建出来的标签**不会再触发其它工作流**（GitHub 防止递归），
-所以打标签和发布必须在同一个 run 里做完，触发方式换成手动触发。
-
-工作流自己会拦三种情况：
-
-- 不是从 `main` 触发（比如选了某个分支）→ 直接失败；
-- `main` 在上次触发后又有新提交 → 失败，要求先拉平（保证发的一定是最新 main）；
-- 同名标签已存在且指向别的提交 → 失败，要求先把版本号往上调。若标签已指向本次提交（上次跑到一半失败后重跑），
-  跳过创建继续发，方便重试。
-
-标签名从 `package.json` 推出来（`v<version>`），所以不存在「标签和版本号对不上」的情况。
-
-### 仓库上的两条 ruleset
-
-| 名称 | 目标 | 规则 | 作用 |
-| --- | --- | --- | --- |
-| `default` | 分支 `refs/heads/main` | PR、线性历史、`test` 检查 | 禁止直接推 `main`；合并只能 squash / rebase |
-| `release-tags` | 标签 `refs/tags/v*` | `deletion`、`update` | 已发布的版本标签不能删、不能移动（删了标签，Release 和市场里的版本就对不上了） |
-
-`release-tags` 没有任何绕过者，所以**你自己也删不掉标签**。确实要删的话，先把规则停用再删，删完记得开回来：
-
-```bash
-# 查 ruleset id
-gh api repos/{owner}/{repo}/rulesets -q '.[] | "\(.id) \(.name)"'
-# 停用（注意是 PUT，PATCH 会返回 404）
-gh api -X PUT repos/{owner}/{repo}/rulesets/<id> -f enforcement=disabled
-git push origin --delete v0.1.1     # 或 gh api -X DELETE repos/{owner}/{repo}/git/refs/tags/v0.1.1
-# 开回来
-gh api -X PUT repos/{owner}/{repo}/rulesets/<id> -f enforcement=active
-```
-
-### pnpm 的构建脚本白名单
-
-pnpm 12 把「允许哪些依赖在安装时跑脚本」放在 `pnpm-workspace.yaml` 的 `allowBuilds` 里（`package.json` 的 `pnpm` 字段已经无效）。当前配置：`esbuild: true`（它要装二进制）、`@vscode/vsce-sign: false`（只在签名发布时用，我们不用）。不加这个的话 CI 的 `pnpm install` 会以 `ERR_PNPM_IGNORED_BUILDS` 失败。
+pnpm 允许依赖执行安装脚本的规则在 `pnpm-workspace.yaml` 的 `allowBuilds` 中：esbuild 需要安装二进制；不使用的签名工具脚本显式禁用。只有依赖或构建方式改变时才调整这份配置。
