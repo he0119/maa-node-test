@@ -62,7 +62,6 @@ export function fixtureResult(
         cases,
     };
     return {
-        schemaVersion: 1,
         status: "passed",
         durationMs: 10,
         files: [metadata],

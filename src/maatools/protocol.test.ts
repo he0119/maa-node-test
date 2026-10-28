@@ -11,18 +11,44 @@ function validate(result: unknown) {
     return validateResultDocument(result, selection);
 }
 
-test("已知schema的合法结果可以使用不连续原始下标", () => {
+test("合法结果无需版本字段并可使用不连续原始下标", () => {
     const result = fixtureResult();
     assert.equal(validate(result), result);
+    assert.doesNotMatch(
+        JSON.stringify([
+            result,
+            upstreamReports,
+        ]),
+        /"schemaVersion"/,
+    );
 });
 
-test("拒绝未知版本、状态和缺失的必要子结构", () => {
+test("清单和运行结果允许额外未知字段，必需字段仍按真实数据验证", () => {
+    const result = {...fixtureResult(), diagnostics: {future: true}};
+    assert.equal(validate(result), result);
+    const list = {files: result.files, diagnostics: ["extra"]};
+    assert.equal(validateListDocument(list), list);
+    for (const invalid of [
+        null,
+        [],
+        true,
+        1,
+        "result",
+        {},
+        {files: null},
+    ]) {
+        assert.throws(() => validateListDocument(invalid));
+        assert.throws(() => validate(invalid));
+    }
+});
+
+test("拒绝未知状态、缺失的必要字段和子结构", () => {
     for (const mutate of [
         (result: Record<string, unknown>) => {
-            delete result.schemaVersion;
+            delete result.status;
         },
         (result: Record<string, unknown>) => {
-            result.schemaVersion = 2;
+            delete result.groups;
         },
         (result: Record<string, unknown>) => {
             result.status = "success";
@@ -140,7 +166,6 @@ test("实际maa-tools report输出：部分缺图可以文件pass，全缺图err
 
 test("启动错误必须带错误代码；empty不能仅凭空groups猜测", () => {
     const result: ResultDocument = {
-        schemaVersion: 1,
         status: "error",
         groups: [],
         files: [],
@@ -156,7 +181,7 @@ test("启动错误必须带错误代码；empty不能仅凭空groups猜测", () 
 
 test("收集协议检查绝对路径、元数据和重复下标；接受错误额外字段", () => {
     const file = structuredClone(fixtureResult().files[0]);
-    const doc = {schemaVersion: 1, files: [file]};
+    const doc = {files: [file]};
     validateListDocument(doc);
     validateListDocument({...doc, status: "error", groups: [], durationMs: 0, errorCode: "collection-source-missing"});
     file.file = "tests/test_a.json";

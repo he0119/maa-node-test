@@ -26,15 +26,13 @@ const selection: ResultSelection = {
     ]),
 };
 const origin = (index: number) => ({file: "/repo/tests/test_a.json", case: index});
-const started = (index: number): TestRunEvent => ({schemaVersion: 1, type: "case-started", origin: origin(index)});
+const started = (index: number): TestRunEvent => ({type: "case-started", origin: origin(index)});
 const caseEvent = (index: number, result = fixtureResult("/repo", [index])): TestRunEvent => ({
-    schemaVersion: 1,
     type: "case-result",
     origin: origin(index),
     result,
 });
 const fileEvent = (result = fixtureResult()): TestRunEvent => ({
-    schemaVersion: 1,
     type: "file-result",
     file: result.files[0].file,
     result,
@@ -44,16 +42,30 @@ function finalCheck(progress: RunProgress, result = fixtureResult()) {
     progress.checkFinal(validateResultDocument(result, selection));
 }
 
-test("进度拒绝未知schema/type、相对来源和请求外文件或用例", () => {
+test("三类进度无需版本字段，额外未知字段仍可忽略", () => {
+    for (const event of [
+        started(1),
+        caseEvent(1),
+        fileEvent(),
+    ]) {
+        assert.doesNotMatch(JSON.stringify(event), /"schemaVersion"/);
+        assert.equal(validateTestRunEvent(event, selection), event);
+        const extended = {...event, diagnostics: {future: true}};
+        assert.equal(validateTestRunEvent(extended, selection), extended);
+    }
+});
+
+test("进度拒绝缺失字段、未知type、相对来源和请求外文件或用例", () => {
     for (const event of [
         null,
-        {...started(1), schemaVersion: 2},
+        {type: "case-started"},
+        {origin: origin(1)},
         {...started(1), type: ["case-started"]},
         {...started(1), type: "future-result"},
-        {schemaVersion: 1, type: "case-started", origin: {file: "tests/test_a.json", case: 1}},
-        {schemaVersion: 1, type: "case-started", origin: {file: "/repo/tests/other.json", case: 1}},
+        {type: "case-started", origin: {file: "tests/test_a.json", case: 1}},
+        {type: "case-started", origin: {file: "/repo/tests/other.json", case: 1}},
         started(2),
-        {schemaVersion: 1, type: "case-started", origin: {file: origin(1).file, case: 1.5}},
+        {type: "case-started", origin: {file: origin(1).file, case: 1.5}},
     ])
         assert.throws(() => validateTestRunEvent(event, selection));
 });
@@ -63,7 +75,6 @@ test("结果事件必须是与来源一致的单case或单file完整快照", () 
     assert.throws(() => validateTestRunEvent(caseEvent(3, fixtureResult("/repo", [1])), selection), /下标不完整/);
     assert.throws(() => validateTestRunEvent(fileEvent(fixtureResult("/repo", [1])), selection), /下标不完整/);
     const startup: ResultDocument = {
-        schemaVersion: 1,
         status: "error",
         errorCode: "config-load-failed",
         groups: [],
@@ -168,7 +179,6 @@ test("最终必须覆盖已开始但未完成的来源，启动错误不能吞�
     assert.throws(
         () =>
             progress.checkFinal({
-                schemaVersion: 1,
                 status: "error",
                 errorCode: "test-execution-failed",
                 files: [],

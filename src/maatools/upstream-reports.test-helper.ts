@@ -2,7 +2,6 @@
 import type {ResultDocument} from "./protocol";
 export const upstreamReports: Record<"partialError" | "partialMissing" | "allMissing" | "empty", ResultDocument> = {
     partialError: {
-        schemaVersion: 1,
         groups: [
             {
                 name: "same name",
@@ -195,7 +194,6 @@ export const upstreamReports: Record<"partialError" | "partialMissing" | "allMis
         reason: "no-result",
     },
     partialMissing: {
-        schemaVersion: 1,
         groups: [
             {
                 name: "same name",
@@ -323,7 +321,6 @@ export const upstreamReports: Record<"partialError" | "partialMissing" | "allMis
         status: "passed",
     },
     allMissing: {
-        schemaVersion: 1,
         groups: [
             {
                 name: "same name",
@@ -402,7 +399,6 @@ export const upstreamReports: Record<"partialError" | "partialMissing" | "allMis
         reason: "no-tests-verified",
     },
     empty: {
-        schemaVersion: 1,
         groups: [],
         files: [
             {

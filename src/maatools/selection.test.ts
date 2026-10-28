@@ -138,7 +138,6 @@ test("空文件完成快照可去重、最终核对并保留取消事实，但�
         ]),
     });
     const event: TestRunEvent = {
-        schemaVersion: 1,
         type: "file-result",
         file: "/repo/tests/test_b.json",
         result: emptyResult(),
@@ -151,7 +150,7 @@ test("空文件完成快照可去重、最终核对并保留取消事实，但�
     assert.equal(partial.counts.get("tests/test_b.json"), 0);
     assert.equal(partial.caseResults.size, 0);
     const started = new RunProgress(emptySelection);
-    started.accept({schemaVersion: 1, type: "case-started", origin: {file: "/repo/tests/test_b.json", case: 1}});
+    started.accept({type: "case-started", origin: {file: "/repo/tests/test_b.json", case: 1}});
     assert.throws(() => started.accept(event), /遗漏已经开始/);
 });
 
@@ -217,7 +216,6 @@ test("Windows请求/来源/expectedCases、事件去重和最终核对共享身�
         validateResultDocument(first, requested);
         const progress = new RunProgress(requested);
         const event: TestRunEvent = {
-            schemaVersion: 1,
             type: "case-result",
             origin: {file: "C:/REPO/tests/TEST_a.JSON", case: 1},
             result: first,
@@ -232,7 +230,7 @@ test("Windows请求/来源/expectedCases、事件去重和最终核对共享身�
         const changed = structuredClone(upper);
         changed.files[0].cases[0].name = "CASE ONE";
         assert.throws(() => progress.accept({...event, result: changed}), /矛盾/);
-        progress.accept({schemaVersion: 1, type: "file-result", file: upper.files[0].file, result: upper});
+        progress.accept({type: "file-result", file: upper.files[0].file, result: upper});
         const partial = progress.partial();
         assert.equal(partial.fileResults.get(pathKey("Tests/Test_A.json")), "pass");
         assert.equal(partial.caseResults.get(caseKeyOf("TESTS/test_A.JSON", 1))?.verdict, "pass");
@@ -247,7 +245,6 @@ test("Windows请求/来源/expectedCases、事件去重和最终核对共享身�
         assert.throws(
             () =>
                 validateListDocument({
-                    schemaVersion: 1,
                     files: [
                         first.files[0],
                         duplicate,

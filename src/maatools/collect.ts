@@ -2,7 +2,7 @@
 // 上游返回实际加载的文件、原始用例下标和源码偏移；扩展检查完整结构后转换显示路径。
 
 import {DEFAULT_CONFIG, buildMaaToolsArgs} from "./command";
-import {MaaToolsLoadError, findMaaToolsCli} from "./installation";
+import {MaaToolsLoadError, findMaaToolsCli, requireSupportedMaaTools} from "./installation";
 import {runChild} from "./process";
 import {displayPath} from "../core/paths";
 import {ResultFormatError, validateListDocument, type ListDocument} from "./protocol";
@@ -23,6 +23,7 @@ export async function collectTests(
     let cli;
     try {
         cli = findMaaToolsCli(request.workspaceRoot);
+        requireSupportedMaaTools(cli.source);
     } catch (error) {
         if (error instanceof MaaToolsLoadError) return {doc: null, stderr: error.message};
         throw error;

@@ -9,7 +9,7 @@ export interface ToolLocation {
 }
 
 export interface ToolStatus {
-    kind: "checking" | "missing" | "unknown" | "ready" | "outdated";
+    kind: "checking" | "missing" | "unknown" | "ready" | "incompatible";
     location: ToolLocation;
     version?: string;
     versionSource?: "cli" | "package";
@@ -18,14 +18,19 @@ export interface ToolStatus {
 
 /** CLI 或安装包提供的值必须确实是版本号，不能拿日志首行当版本。 */
 export function isToolVersion(value: unknown): value is string {
+    if (typeof value !== "string" || value.trim() !== value) return false;
+    const match =
+        /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
+            value,
+        );
     return (
-        typeof value === "string" &&
-        value.trim() === value &&
-        /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value)
+        match !== null &&
+        (match[4] === undefined ||
+            match[4].split(".").every((part) => !/^\d+$/.test(part) || part === "0" || !part.startsWith("0")))
     );
 }
 
-export function describeToolStatus(status: ToolStatus, minimumVersion: string): {text: string; tooltip: string} {
+export function describeToolStatus(status: ToolStatus, supportedRange: string): {text: string; tooltip: string} {
     const version = status.version ?? "版本未知";
     const labels = {
         checking: {text: "maa-tools 查询中…", state: "正在查询命令行版本"},
@@ -35,7 +40,7 @@ export function describeToolStatus(status: ToolStatus, minimumVersion: string): 
             state: "命令行版本查询失败",
         },
         ready: {text: `maa-tools ${version}`, state: "版本满足要求"},
-        outdated: {text: `maa-tools ${version}（过旧）`, state: "版本低于扩展最低要求"},
+        incompatible: {text: `maa-tools ${version}（不兼容）`, state: "版本不在扩展支持范围内"},
     };
     const {location} = status;
     const lines = [
@@ -45,7 +50,7 @@ export function describeToolStatus(status: ToolStatus, minimumVersion: string): 
                   `版本：${version}（${status.versionSource === "package" ? "安装包 package.json 声明" : "命令行 --version"}）`,
               ]
             : []),
-        `最低版本：${minimumVersion}`,
+        `支持范围：${supportedRange}`,
         `被测仓库：${location.workspaceRoot}`,
         `命令入口：${location.cliPath}`,
         ...(location.resolvedCliPath && location.resolvedCliPath !== location.cliPath

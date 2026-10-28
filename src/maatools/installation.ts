@@ -9,7 +9,9 @@ import {spawn} from "node:child_process";
 import {existsSync, readFileSync} from "node:fs";
 import * as path from "node:path";
 
-/** 找不到仓库里的 maa-tools 命令行入口时抛这个，入口当作前置错误（MaaToolsRunOutcome.error）。 */
+import {isToolVersion} from "../core/toolStatus";
+
+/** 找不到仓库里的 maa-tools，或安装版本不兼容时，入口将其作为前置错误。 */
 export class MaaToolsLoadError extends Error {
     constructor(message: string) {
         super(message);
@@ -28,7 +30,7 @@ export function workspaceMaaToolsCli(workspace: string): string {
     return path.join(workspace, "node_modules", "@nekosu", "maa-tools", "bin", "maa-tools");
 }
 
-/** 读一份 maa-tools 的版本号，读不到就返回 null。只用于日志，出问题时能看出用的是哪一份。 */
+/** 读一份 maa-tools 的版本号，读不到就返回 null。供实际启动前检查与版本状态查询共用。 */
 export function readMaaToolsVersion(cliPath: string): string | null {
     try {
         const packageJsonPath = path.join(path.dirname(path.dirname(cliPath)), "package.json");
@@ -61,19 +63,21 @@ export function findMaaToolsCli(workspace: string): {cliPath: string; source: Ma
     return {cliPath, source: {path: cliPath, version: readMaaToolsVersion(cliPath)}};
 }
 
-/** 插件支持的最低 maa-tools 版本：1.1.2 及更早的 CLI 没有 --list/--json，拿不到结构化结果 */
-export const MIN_MAA_TOOLS_VERSION = "1.1.3";
+/** 本插件读取 maa-tools 1.x 的收集与运行数据；边界同用于状态栏和实际启动检查。 */
+export const MIN_MAA_TOOLS_VERSION = "1.2.0";
+export const MAX_MAA_TOOLS_VERSION_EXCLUSIVE = "2.0.0";
+export const MAA_TOOLS_VERSION_RANGE = `>=${MIN_MAA_TOOLS_VERSION} <${MAX_MAA_TOOLS_VERSION_EXCLUSIVE}（仅稳定版）`;
 
 /**
  * 版本号比较：a < b → 负数，相等 → 0，a > b → 正数。
- * 只比数字段（v 前缀忽略）；数字段全等时，带预发布后缀（如 1.1.3-beta）的视为更旧。
+ * 只比数字段（v 前缀忽略）；数字段全等时，带预发布后缀（如 1.2.0-beta）的视为更旧。
  */
 export function compareVersions(a: string, b: string): number {
     const parse = (version: string) => {
         const [
             core = "",
             ...rest
-        ] = version.replace(/^v/, "").split("-");
+        ] = version.replace(/^v/, "").split("+", 1)[0].split("-");
         return {
             parts: core.split(".").map((part) => Number.parseInt(part, 10)),
             preRelease: rest.length > 0,
@@ -86,18 +90,40 @@ export function compareVersions(a: string, b: string): number {
         const r = right.parts[i] ?? 0;
         if (l !== r) return l < r ? -1 : 1;
     }
-    // 数字段全等：1.1.3-beta < 1.1.3
+    // 数字段全等：1.2.0-beta < 1.2.0
     if (left.preRelease !== right.preRelease) return left.preRelease ? -1 : 1;
     return 0;
 }
 
-/** 这个版本的 maa-tools 够不够用（--list/--json 起步） */
-export function isMaaToolsVersionSupported(version: string): boolean {
-    return compareVersions(version, MIN_MAA_TOOLS_VERSION) >= 0;
+/** 版本格式正确且是受支持的稳定版；构建元数据不影响兼容性。 */
+export function isMaaToolsVersionSupported(version: unknown): boolean {
+    return (
+        isToolVersion(version) &&
+        !version.split("+", 1)[0].includes("-") &&
+        compareVersions(version, MIN_MAA_TOOLS_VERSION) >= 0 &&
+        compareVersions(version, MAX_MAA_TOOLS_VERSION_EXCLUSIVE) < 0
+    );
+}
+
+/** 真实收集与运行共用安装包检查；通过后仍须检查进程启动和实际输出。 */
+export function requireSupportedMaaTools(source: MaaToolsSource): void {
+    if (isMaaToolsVersionSupported(source.version)) return;
+    const reason =
+        source.version === null
+            ? "安装包版本未知或无法读取"
+            : !isToolVersion(source.version)
+              ? `安装包版本格式无效：${JSON.stringify(source.version)}`
+              : `安装包版本 ${source.version} 不兼容`;
+    const packagePath = path.join(path.dirname(path.dirname(source.path)), "package.json");
+    throw new MaaToolsLoadError(
+        `${reason}；节点测试支持 ${MAA_TOOLS_VERSION_RANGE}。\n` +
+            `版本来源：${packagePath}\n命令入口：${source.path}\n` +
+            "请检查被测仓库的 @nekosu/maa-tools 依赖声明、锁文件和实际安装版本，再执行 pnpm install。",
+    );
 }
 
 /**
- * 跑一次 `maa-tools --version` 问出 CLI 自己报的版本（插件激活时用它确认版本够新）。
+ * 跑一次 `maa-tools --version` 问出 CLI 自己报的版本（状态栏与兼容提示共用）。
  * 问不到（旧版 CLI 不认识 --version、或进程起不来）返回 null，调用方自行兜底。
  */
 export function queryMaaToolsVersion(nodePath: string, cliPath: string): Promise<string | null> {

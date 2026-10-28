@@ -32,10 +32,12 @@ Maa 节点测试的 VS Code 插件。它调用被测仓库里的 `maa-tools` 收
 | 需要 | 说明 |
 | --- | --- |
 | Node 22 或更高 | 不在 PATH 中时设置 `maaNodeTest.nodePath` |
-| 已安装依赖的被测仓库 | 配置中已定义节点测试；仓库里的 maa-tools 至少为 1.1.3，并提供本插件需要的收集和运行接口 |
+| 已安装依赖的被测仓库 | 配置中已定义节点测试；仓库里的 maa-tools 为稳定版 `>=1.2.0 <2.0.0`，并提供本插件需要的收集和运行接口 |
 | VS Code 1.85 或更高 | 运行插件的窗口须打开被测仓库 |
 
-插件使用被测仓库安装的 `@nekosu/maa-tools`，不另外安装一份。主状态栏显示版本或查询状态；读取测试结果时仍会检查格式，不能只凭版本号判断是否支持。
+插件使用被测仓库安装的 `@nekosu/maa-tools`，不另外安装一份。收集与运行读取这份包的 `package.json` 检查版本，不为每次操作额外执行 `--version`。允许版本号带 `v` 前缀或构建元数据，不接受预发布版、版本未知或格式无效的版本。版本在支持范围内时，命令仍须成功启动，返回内容仍须通过必需结构、记录 `type`、来源覆盖和进度与最终结果一致性检查。
+
+配套 maa-tools 1.2.0 当前是待发布的代码版本，两仓 PR 须配套合并并完成发版；这里的支持范围不表示 npm 已提供该版本。1.x 内的 JSON 兼容规则见 [reference](.agents/skills/maa-node-test-dev/reference.md#包版本与-json-兼容)。
 
 运行测试会由 maa-tools 写入识别日志，默认在被测仓库的 `debug` 目录下。插件不会替你安装依赖或改写测试文件。
 
@@ -71,8 +73,14 @@ pnpm run build
     "name": "调试 Maa 节点测试插件",
     "type": "extensionHost",
     "request": "launch",
-    "args": ["--extensionDevelopmentPath=${userHome}/dev/maa-node-test", "${workspaceFolder}"],
-    "outFiles": ["${userHome}/dev/maa-node-test/out/**/*.js", "${userHome}/dev/maa-node-test/dist/**/*.js"]
+    "args": [
+        "--extensionDevelopmentPath=${userHome}/dev/maa-node-test",
+        "${workspaceFolder}"
+    ],
+    "outFiles": [
+        "${userHome}/dev/maa-node-test/out/**/*.js",
+        "${userHome}/dev/maa-node-test/dist/**/*.js"
+    ]
 }
 ```
 
@@ -84,7 +92,7 @@ pnpm run build
 
 主状态栏左侧显示无图标的 `maa-tools <版本>`，与 MaaSupport/MaaFramework 版本项一样使用默认优先级。被测仓库有配置或 maa-tools 包时常显，编辑普通文件也能看到；无工作区，或普通项目两者都没有时隐藏。
 
-点击整项重新查询，悬浮查看版本来源、被测仓库、命令入口、软链接实际文件、Node、配置和错误原因。查询中、未安装、过旧或查询失败均有对应文字；安装包声明的版本不能证明命令能正常执行。
+点击整项重新查询，悬浮查看版本来源、支持范围、被测仓库、命令入口、软链接实际文件、Node、配置和错误原因。状态栏优先使用 `maa-tools --version`，与兼容提示共用查询结果。查询中、未安装、版本不受支持或查询失败均有对应文字；查询失败时，安装包声明的版本只供排错，不能证明命令能正常执行。
 
 切换工作区、修改 Node 或配置路径、相关依赖与锁文件变化后会自动刷新。任务运行数量仍在原状态栏项显示。
 
@@ -163,9 +171,9 @@ CloudADB-官服 失败
 
 确认调试窗口打开的是被测仓库，配置路径正确，并且已安装提供所需接口的 maa-tools。收集会加载该配置和 `test.cases`；检查配置加载错误、测试读取错误或缺少来源的提示。无来源的程序生成用例不能凭名字猜成某个文件。
 
-**提示 maa-tools 太旧、不可用或结果格式不支持。**
+**提示 maa-tools 版本不受支持、不可用或结果格式不符合要求。**
 
-在左侧状态栏查看 maa-tools 版本，悬浮核对来源，点击整项刷新。更新依赖声明和锁文件后再执行 `pnpm install`；仅执行安装不一定会升级锁定版本。若无法查询，检查 Node 路径；若版本正常但结果格式不支持，按测试输出的具体错误处理。
+在左侧状态栏查看 maa-tools 版本，悬浮核对来源，点击整项刷新。使用稳定版 `>=1.2.0 <2.0.0`；版本过低时更新依赖声明和锁文件，再执行 `pnpm install`，仅执行安装不一定会升级锁定版本。预发布版请换成受支持的稳定版；2.0.0 及更高版本须等插件明确支持后再使用。若无法查询，检查 Node 路径；若包版本在范围内但命令启动或数据检查失败，按测试输出的具体错误处理。
 
 **提示没有匹配到用例。**
 

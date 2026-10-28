@@ -6,6 +6,9 @@ import {test} from "node:test";
 
 import {
     MIN_MAA_TOOLS_VERSION,
+    MAX_MAA_TOOLS_VERSION_EXCLUSIVE,
+    MAA_TOOLS_VERSION_RANGE,
+    requireSupportedMaaTools,
     MaaToolsLoadError,
     describeMaaToolsSource,
     compareVersions,
@@ -30,10 +33,10 @@ test("读版本号：正常 package.json 返回版本，缺失或坏 JSON 返回
     try {
         mkdirSync(path.join(root, "bin"), {recursive: true});
         writeFileSync(path.join(root, "bin", "maa-tools"), "#!/usr/bin/env node\n");
-        writeFileSync(path.join(root, "package.json"), JSON.stringify({version: "1.1.2"}));
+        writeFileSync(path.join(root, "package.json"), JSON.stringify({version: "1.2.0"}));
 
         const entry = path.join(root, "bin", "maa-tools");
-        assert.equal(readMaaToolsVersion(entry), "1.1.2");
+        assert.equal(readMaaToolsVersion(entry), "1.2.0");
 
         writeFileSync(path.join(root, "package.json"), "{ 坏 JSON");
         assert.equal(readMaaToolsVersion(entry), null);
@@ -46,10 +49,10 @@ test("读版本号：正常 package.json 返回版本，缺失或坏 JSON 返回
 test("日志描述写明是仓库里的哪份（相对路径）", () => {
     const source = {
         path: path.join(WORKSPACE, "node_modules", "@nekosu", "maa-tools", "bin", "maa-tools"),
-        version: "1.1.2",
+        version: "1.2.0",
     };
     const text = describeMaaToolsSource(source, WORKSPACE);
-    assert.match(text, /1\.1\.2/);
+    assert.match(text, /1\.2\.0/);
     assert.match(text, /node_modules\/@nekosu\/maa-tools\/bin\/maa-tools/);
     assert.match(text, /仓库里的副本/);
 });
@@ -86,11 +89,56 @@ test("版本比较：数字段逐段比，v 前缀忽略", () => {
     assert.equal(compareVersions("1.1.3", "1.1"), 1);
 });
 
-test("版本门槛：1.1.2 及更早不支持（没有 --list/--json），1.1.3 起支持", () => {
-    assert.equal(isMaaToolsVersionSupported("1.1.2"), false);
-    assert.equal(MIN_MAA_TOOLS_VERSION, "1.1.3");
-    assert.equal(isMaaToolsVersionSupported(MIN_MAA_TOOLS_VERSION), true);
-    assert.equal(isMaaToolsVersionSupported("2.0.0"), true);
+test("支持范围包含1.2.0并排除2.0.0，允许v前缀和构建元数据", () => {
+    assert.equal(MIN_MAA_TOOLS_VERSION, "1.2.0");
+    assert.equal(MAX_MAA_TOOLS_VERSION_EXCLUSIVE, "2.0.0");
+    assert.equal(MAA_TOOLS_VERSION_RANGE, `>=${MIN_MAA_TOOLS_VERSION} <${MAX_MAA_TOOLS_VERSION_EXCLUSIVE}（仅稳定版）`);
+    for (const version of [
+        MIN_MAA_TOOLS_VERSION,
+        "v1.2.0",
+        "1.2.0+build.7",
+        "v1.2.0+build-with-hyphen",
+        "1.10.0",
+        "1.999.999",
+    ]) {
+        assert.equal(isMaaToolsVersionSupported(version), true, version);
+        assert.doesNotThrow(() => requireSupportedMaaTools({path: workspaceMaaToolsCli(WORKSPACE), version}));
+    }
+    assert.equal(compareVersions("1.2.0+build-with-hyphen", "v1.2.0"), 0);
+});
+
+test("未知、坏格式、旧版、预发布和未来主版本都明确拒绝且带范围来源", () => {
+    for (const version of [
+        null,
+        "",
+        "unknown",
+        "1.2",
+        "1.2.0 trailing",
+        "01.2.0",
+        "1.2.0+build..1",
+        "1.1.2",
+        "1.1.3",
+        "1.2.0-rc.1",
+        "1.9.0-beta",
+        MAX_MAA_TOOLS_VERSION_EXCLUSIVE,
+        "v2.0.0+build.3",
+        "3.0.0",
+    ]) {
+        assert.equal(isMaaToolsVersionSupported(version), false, String(version));
+        const source = {path: workspaceMaaToolsCli(WORKSPACE), version};
+        assert.throws(
+            () => requireSupportedMaaTools(source),
+            (error) => {
+                assert.ok(error instanceof MaaToolsLoadError);
+                assert.ok(error.message.includes(MAA_TOOLS_VERSION_RANGE));
+                assert.ok(error.message.includes(source.path));
+                assert.match(error.message, /package\.json/);
+                assert.match(error.message, /未知|无效|不兼容/);
+                return true;
+            },
+        );
+    }
+    assert.equal(isMaaToolsVersionSupported(120), false);
 });
 
 test("queryMaaToolsVersion：跑 --version 问出版本；打的不是版本号或起不来就返回 null", async () => {

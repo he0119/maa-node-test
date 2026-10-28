@@ -220,7 +220,7 @@ export class RunProgress {
     /** 取消或进程异常时只交回已校验的完成事实；单条快照不表示整个文件完成。 */
     partial(): ReturnType<typeof adaptResultFiles> {
         const partial = adaptResultFiles(
-            {schemaVersion: 1, status: "error", groups: [], files: [], durationMs: 0},
+            {status: "error", groups: [], files: [], durationMs: 0},
             this.selection.workspaceRoot,
         );
         for (const document of this.fileDocuments.values()) {

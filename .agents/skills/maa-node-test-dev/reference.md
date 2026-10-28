@@ -14,11 +14,11 @@
 | [testController.ts](../../../src/testController.ts) | `NodeTestExplorer` 管理 VS Code 测试树、收集刷新、运行队列、范围与排除、取消、缺图诊断，以及逐文件和用例标记 |
 | [toolVersionStatus.ts](../../../src/toolVersionStatus.ts) | `MaaToolsVersionStatus` 管理左侧版本状态栏、版本查询与兼容提示、依赖监听、自动刷新和迟到结果保护 |
 | [maatools/command.ts](../../../src/maatools/command.ts) | 保存默认配置文件名，生成收集与运行参数；`quoteArgument()`、`formatCommandLine()` 生成供人查看的命令文字，不参与实际参数传递 |
-| [maatools/installation.ts](../../../src/maatools/installation.ts) | 定位被测仓库安装的命令入口，读取包版本、查询命令版本、比较最低版本，并描述工具来源 |
+| [maatools/installation.ts](../../../src/maatools/installation.ts) | 定位被测仓库安装的命令入口，读取包版本并检查支持范围，提供状态栏的命令版本查询和来源说明 |
 | [maatools/process.ts](../../../src/maatools/process.ts) | `runChild()` 启动子进程，按 UTF-8 读取标准输出，支持单份 JSON 或逐行消费，转发 stderr，记录退出码、信号和读取错误；收集与运行直接共用 |
 | [maatools/collect.ts](../../../src/maatools/collect.ts) | `collectTests()` 接收 `TestCollectionRequest`，执行 `test --list --json`，检查收集清单及错误，并转换显示路径 |
 | [maatools/run.ts](../../../src/maatools/run.ts) | `startMaaToolsRun()` 接收 `MaaToolsRunRequest`，编排一次 `test --jsonl` 的启动、取消、记录校验、最终对账、结果转换和日志输出；对外提供 `MaaToolsRun*` 类型 |
-| [maatools/protocol.ts](../../../src/maatools/protocol.ts) | 定义收集、事件、运行报告及 `FileVerdict`、`CaseOutcome` 等机器数据类型；在读取边界检查版本、字段、来源、选择范围、覆盖与汇总一致性 |
+| [maatools/protocol.ts](../../../src/maatools/protocol.ts) | 定义收集、事件、运行报告及 `FileVerdict`、`CaseOutcome` 等机器数据类型；在读取边界检查必需结构、记录 `type`、来源、选择范围、覆盖与汇总一致性 |
 | [maatools/progress.ts](../../../src/maatools/progress.ts) | `RunProgress` 保存已开始和已完成事实，相同重复去重、矛盾检查、最终对账，并提供取消或异常时可保留的完成结果 |
 | [maatools/resultAdapter.ts](../../../src/maatools/resultAdapter.ts) | 将已校验的上游文件和用例结果转换为显示数据，翻译原因，整理平台明细、耗时及面板文案；沿用上游结论 |
 | [maatools/output.ts](../../../src/maatools/output.ts) | 将平台覆盖、实际缺图路径、文件结果和有问题的用例排成中文日志 |
@@ -67,16 +67,22 @@
 
 仓库配置、命令行测试和编辑器测试使用同一版本的工具，减少版本差异；MaaFramework 的版本与准备方式仍由该仓库配置决定。实际识别结果还受配置、资源和框架版本影响，使用同一工具并不是“两处结果必然一致”的保证。
 
-找不到入口时明确报错。最低版本要求为 1.1.3；运行时另检查 `schemaVersion: 1` 和必需字段，不能仅凭版本号接受任意 JSON。安装命令不会自动突破锁文件，升级提示应引导检查依赖声明、锁文件和实际安装的版本。
+找不到入口时明确报错。`collectTests()` 与 `startMaaToolsRun()` 都在 `findMaaToolsCli()` 后调用 `requireSupportedMaaTools()`，从该安装包的 `package.json` 取得版本并在启动命令前检查支持范围，不为每次操作额外执行 `--version`。包版本通过后仍须检查启动、退出与实际返回的数据。安装命令不会自动突破锁文件，升级提示应引导检查依赖声明、锁文件和实际安装的版本。
+
+## 包版本与 JSON 兼容
+
+插件只接受稳定版 `>=1.2.0 <2.0.0`。版本号可带 `v` 前缀或构建元数据，例如 `v1.2.0+local.1`；预发布版、未知或格式无效的版本，以及低于下界或达到上界的版本均拒绝。安装包声明只用于选择受支持的版本，不能证明命令可以启动或返回可信结果。收集清单、运行报告和逐行记录仍按必需结构、合法 `type`、来源、所选下标、结果覆盖及进度与最终报告一致性严格校验。
+
+JSON 兼容性随 maa-tools 包版本管理。1.x 内可以增加旧插件可忽略的可选字段；改名、删除必需字段、改变字段类型或结论语义，以及增加旧插件必须处理的新记录 `type` 或枚举值，都属于不兼容变更，须发布新主版本。新主版本要等插件明确支持后才接收。
 
 ## 工具版本状态栏
 
 `MaaToolsVersionStatus` 使用左侧 `StatusBarItem`，与 MaaSupport/MaaFramework 一样省略优先级参数，使用 VS Code 默认优先级。运行器显示运行数量的状态项仍为 priority 100。版本查询与兼容提示共用结果。
 
 - 被测仓库有配置或 maa-tools 包时常显，编辑普通文件也显示；无工作区，或普通项目两者都没有时隐藏。
-- 正常标题为无图标的 `maa-tools <版本>`；查询中、未安装、过旧和查询失败均显示对应文字。
-- 优先使用 `maa-tools --version`。查询失败时，安装包版本只供排错：过旧仍标过旧，其余标未确认或版本未知，不能据包声明确认命令可运行。
-- 点击整项执行 `maaNodeTest.refreshToolVersion`，只查询、不运行测试或打开新面板。悬浮提示保留版本来源、最低版本、仓库、命令入口、软链接实际文件、Node、配置和失败原因。
+- 正常标题为无图标的 `maa-tools <版本>`；查询中、未安装、版本不受支持和查询失败均显示对应文字。
+- 优先使用 `maa-tools --version`，与兼容提示共用这次查询。命令查询失败时，安装包版本只供说明版本范围与排错；包声明在支持范围内也只能显示未确认，不能据此确认命令可运行。实际收集与运行的包版本检查独立于这项显示查询。
+- 点击整项执行 `maaNodeTest.refreshToolVersion`，只查询、不运行测试或打开新面板。悬浮提示保留版本来源、支持范围、仓库、命令入口、软链接实际文件、Node、配置和失败原因。
 - 工作区、`nodePath`、`configPath`、配置文件、相关包清单与锁文件、工具入口及安装位置变化后刷新，也监视软链接实际目标。
 - 查询与防抖刷新有序号，旧结果不能覆盖新状态；停用时清理定时器、监听和状态栏项。
 
@@ -112,7 +118,7 @@ node node_modules/@nekosu/maa-tools/bin/maa-tools --version
 
 ## 收集结果
 
-`--list --json` 成功收集的顶层为 `{schemaVersion: 1, files: [...]}`。收集失败含 `errorCode`、`reason`，CLI 顶层错误结果还带 `status: 'error'`、`groups` 和 `durationMs`；可以保留已经识别的文件。单独 `--list` 将同一结果显示为文件、原始下标、名称或截图、文件错误及总数，不输出这份 JSON。
+`--list --json` 成功收集的顶层为 `{files: [...]}`。收集失败含 `errorCode`、`reason`，CLI 顶层错误结果还带 `status: 'error'`、`groups` 和 `durationMs`；可以保留已经识别的文件。单独 `--list` 将同一结果显示为文件、原始下标、名称或截图、文件错误及总数，不输出这份 JSON。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -131,7 +137,6 @@ node node_modules/@nekosu/maa-tools/bin/maa-tools --version
 `--jsonl` 最后记录的 `result` 和普通 `--json` 的整个文档都是完整 `TestRunResult`，包含以下字段：
 
 ```text
-schemaVersion: 1
 status: passed | failed | error | empty
 groups: TestGroupRunResult[]
 files: TestFileRunResult[]
@@ -177,7 +182,7 @@ reason?: string
 
 所有扩展运行固定使用 `--jsonl`，子进程的 stdio 为 `ignore/pipe/pipe`。标准输出每行一个紧凑 JSON，并以换行结束；stderr 是人类日志。`MaaToolsRunHandlers` 和 `TestProcessHandlers` 的可选 `onProgress` 只接收校验后的三类 `TestRunEvent`，不决定输出格式。
 
-流中每条记录都带 `schemaVersion: 1`：
+流中保留 `type` 区分记录，事件与其结果快照都要通过结构和范围校验：
 
 | type | 其他字段 | 含义 |
 | --- | --- | --- |
@@ -188,7 +193,7 @@ reason?: string
 
 框架在每张图的全部节点块完成后立即判定，同图复用用例分别比较自己的期望；来源的最后一个计划平台结束后才发用例结果。缺图、无节点及空选择文件可以直接完成，不伪造识别开始；空文件快照沿用 skipped/no-cases-selected 及严格范围校验。尚未形成计划的配置错误仅由最终结果说明。资源组和测试组仍按计划处理，组内识别任务并行，不改成逐文件进程。
 
-快照的 groups 同样限定在对应范围，并复用最终报告的汇总规则。用例快照按单文件、单原始下标校验；文件快照按该文件的 expectedCases 校验。记录还检查版本、类型、请求来源、原始下标和快照身份，未经校验的标准输出记录不能直接交给面板。
+快照的 groups 同样限定在对应范围，并复用最终报告的汇总规则。用例快照按单文件、单原始下标校验；文件快照按该文件的 expectedCases 校验。记录还检查合法 `type`、必需结构、请求来源、原始下标和快照身份，未经校验的标准输出记录不能直接交给面板。
 
 `RunProgress` 保存已开始和已完成事实，相同重复消息不再发布，包括完成后重复收到已记录的开始消息。重复结果矛盾、此前未报告开始却在完成后首次报告开始、文件结果遗漏已开始或已完成用例都报协议错误。平台返回顺序不影响比较，但来源、元数据、结论、检查和识别耗时必须一致。
 

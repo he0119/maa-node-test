@@ -6,7 +6,7 @@ import type {spawn} from "node:child_process";
 import {DEFAULT_CONFIG, buildMaaToolsArgs} from "./command";
 import type {FileVerdict} from "./protocol";
 import {runChild} from "./process";
-import {MaaToolsLoadError, describeMaaToolsSource, findMaaToolsCli} from "./installation";
+import {MaaToolsLoadError, describeMaaToolsSource, findMaaToolsCli, requireSupportedMaaTools} from "./installation";
 import {displayPath, resolveFromWorkspace} from "../core/paths";
 import {ResultFormatError, validateResultDocument, type ResultDocument, type TestRunEvent} from "./protocol";
 import {RunProgress} from "./progress";
@@ -121,6 +121,7 @@ export function startMaaToolsRun(request: MaaToolsRunRequest, handlers: MaaTools
         let cli;
         try {
             cli = findMaaToolsCli(workspace);
+            requireSupportedMaaTools(cli.source);
         } catch (error) {
             if (error instanceof MaaToolsLoadError)
                 return {...base, errorCode: "maa-tools-unavailable", error: error.message};
@@ -152,9 +153,18 @@ export function startMaaToolsRun(request: MaaToolsRunRequest, handlers: MaaTools
             },
             (line) => {
                 if (result) throw new ResultFormatError("run-result 必须唯一且为最后一条记录");
-                const record = JSON.parse(line) as {schemaVersion?: unknown; type?: unknown; result?: unknown} | null;
-                if (record?.schemaVersion === 1 && record.type === "run-result") {
-                    result = validateResultDocument(record.result, {...request, workspaceRoot: workspace});
+                const record: unknown = JSON.parse(line);
+                if (
+                    record !== null &&
+                    typeof record === "object" &&
+                    !Array.isArray(record) &&
+                    "type" in record &&
+                    record.type === "run-result"
+                ) {
+                    result = validateResultDocument("result" in record ? record.result : undefined, {
+                        ...request,
+                        workspaceRoot: workspace,
+                    });
                     progress.checkFinal(result);
                 } else {
                     const event = progress.accept(record);

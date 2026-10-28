@@ -30,7 +30,6 @@ export interface ListFileEntry {
 }
 
 export interface ListDocument {
-    schemaVersion: 1;
     files: ListFileEntry[];
     errorCode?: string;
     reason?: string;
@@ -86,7 +85,6 @@ export interface RunFileResult extends Omit<ListFileEntry, "cases"> {
 }
 
 export interface ResultDocument {
-    schemaVersion: 1;
     status: "passed" | "failed" | "error" | "empty";
     groups: RunGroupResult[];
     files: RunFileResult[];
@@ -97,9 +95,9 @@ export interface ResultDocument {
 
 /** 标准输出中的逐项进度；完整运行报告另由末尾 run-result 行携带。 */
 export type TestRunEvent =
-    | {schemaVersion: 1; type: "case-started"; origin: CaseOrigin}
-    | {schemaVersion: 1; type: "case-result"; origin: CaseOrigin; result: ResultDocument}
-    | {schemaVersion: 1; type: "file-result"; file: string; result: ResultDocument};
+    | {type: "case-started"; origin: CaseOrigin}
+    | {type: "case-result"; origin: CaseOrigin; result: ResultDocument}
+    | {type: "file-result"; file: string; result: ResultDocument};
 
 export interface ResultSelection {
     workspaceRoot: string;
@@ -191,10 +189,6 @@ function fileMetadata(value: unknown, at: string): void {
 
 function documentHeader(value: unknown): asserts value is Record<string, unknown> & {files: unknown[]} {
     object(value, "结果");
-    requireValue(
-        value.schemaVersion === 1,
-        `不支持 maa-tools 结果版本 ${String(value.schemaVersion)}，需要 schemaVersion: 1`,
-    );
     array(value.files, "files");
     optionalText(value.errorCode, "errorCode");
     optionalText(value.reason, "reason");
@@ -496,7 +490,6 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
 /** 只接受所选来源的进度；结果快照沿用最终报告的完整协议检查。 */
 export function validateTestRunEvent(value: unknown, selection: ResultSelection): TestRunEvent {
     object(value, "进度消息");
-    requireValue(value.schemaVersion === 1, "进度消息必须使用 schemaVersion: 1");
     requireValue(
         value.type === "case-started" || value.type === "case-result" || value.type === "file-result",
         `不支持的进度消息类型 ${String(value.type)}`,

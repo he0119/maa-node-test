@@ -5,7 +5,7 @@ import * as vscode from "vscode";
 import {readNodeTestConfig, resolveNodeTestWorkspace} from "./config";
 import {describeToolStatus, isToolVersion, type ToolLocation, type ToolStatus} from "./core/toolStatus";
 import {
-    MIN_MAA_TOOLS_VERSION,
+    MAA_TOOLS_VERSION_RANGE,
     findMaaToolsCli,
     isMaaToolsVersionSupported,
     queryMaaToolsVersion,
@@ -97,7 +97,7 @@ export class MaaToolsVersionStatus implements vscode.Disposable {
         const reason = fromCli
             ? undefined
             : "命令行版本查询失败，请检查 Node 路径及依赖是否完整；安装包声明的版本不代表命令可正常运行。";
-        const kind = version && !isMaaToolsVersionSupported(version) ? "outdated" : fromCli ? "ready" : "unknown";
+        const kind = version && !isMaaToolsVersionSupported(version) ? "incompatible" : fromCli ? "ready" : "unknown";
         this.publish({kind, location, version, versionSource, reason});
     }
 
@@ -115,7 +115,7 @@ export class MaaToolsVersionStatus implements vscode.Disposable {
 
     private publish(status: ToolStatus): void {
         if (this.disposed) return;
-        const presentation = describeToolStatus(status, MIN_MAA_TOOLS_VERSION);
+        const presentation = describeToolStatus(status, MAA_TOOLS_VERSION_RANGE);
         this.item.text = presentation.text;
         this.item.tooltip = presentation.tooltip;
         this.item.show();
@@ -124,9 +124,9 @@ export class MaaToolsVersionStatus implements vscode.Disposable {
         if (notice === this.lastNotice) return;
         this.lastNotice = notice;
         this.output.appendLine(`${presentation.text.replace(/\$\([^)]*\)\s*/g, "")}\n${presentation.tooltip}`);
-        if (status.kind === "outdated") {
+        if (status.kind === "incompatible") {
             void vscode.window.showWarningMessage(
-                `maa-tools ${status.version} 版本太旧，节点测试需要 ${MIN_MAA_TOOLS_VERSION} 及以上。请检查并更新被测仓库的 @nekosu/maa-tools 依赖版本和锁文件，再执行 pnpm install。`,
+                `maa-tools ${status.version} 与节点测试不兼容。\n${presentation.tooltip}\n请检查被测仓库的 @nekosu/maa-tools 依赖声明、锁文件和实际安装版本，再执行 pnpm install。`,
             );
         }
     }

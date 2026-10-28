@@ -1,5 +1,5 @@
 import {strict as assert} from "node:assert";
-import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import * as path from "node:path";
 import {test, type TestContext} from "node:test";
@@ -10,11 +10,13 @@ import {fixtureResult} from "./result-builders.test-helper";
 import {collectTests} from "./collect";
 import {upstreamReports} from "./upstream-reports.test-helper";
 import type {TestRunEvent} from "./protocol";
+import {MAA_TOOLS_VERSION_RANGE} from "./installation";
 
 function fakeWorkspace(
     t: TestContext,
     output: unknown,
     options: {
+        packageVersion?: unknown;
         exitCode?: number;
         hang?: boolean;
         events?: (workspace: string) => unknown[];
@@ -29,18 +31,23 @@ function fakeWorkspace(
     t.after(() => rmSync(root, {recursive: true, force: true}));
     const cli = path.join(root, "node_modules", "@nekosu", "maa-tools", "bin", "maa-tools");
     mkdirSync(path.dirname(cli), {recursive: true});
+    writeFileSync(
+        path.join(path.dirname(path.dirname(cli)), "package.json"),
+        JSON.stringify({version: Object.hasOwn(options, "packageVersion") ? options.packageVersion : "1.2.0"}),
+    );
     const result = typeof output === "function" ? output(root) : output;
     const argsFile = path.join(root, "received-args.json");
+    const callsFile = path.join(root, "received-calls.jsonl");
     const eol = options.crlf ? "\r\n" : "\n";
     const prefix =
         options.rawStream?.(root) ??
         (options.events?.(root) ?? []).map((event) => JSON.stringify(event) + eol).join("");
-    const final = options.rawStream ? "" : JSON.stringify({schemaVersion: 1, type: "run-result", result}) + eol;
+    const final = options.rawStream ? "" : JSON.stringify({type: "run-result", result}) + eol;
     writeFileSync(
         cli,
         [
             "async function main() {",
-            `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));`,
+            `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2))); fs.appendFileSync(${JSON.stringify(callsFile)}, JSON.stringify(process.argv.slice(2)) + '\\n');`,
             `fs.writeFileSync(${JSON.stringify(path.join(root, "transport.json"))}, JSON.stringify({send:typeof process.send, channel:!!process.channel}));`,
             `async function write(text) { const bytes = Buffer.from(text); const size = ${options.chunkSize ?? 0} || Math.max(bytes.length, 1); for (let i = 0; i < bytes.length; i += size) { await new Promise(resolve => process.stdout.write(bytes.subarray(i, i + size), resolve)); ${options.chunkSize ? "await new Promise(resolve => setImmediate(resolve));" : ""} } }`,
             "process.stderr.write('上游原始日志\\n');",
@@ -57,12 +64,138 @@ function fakeWorkspace(
             "main().catch(error => { console.error(error); process.exitCode = 1; });",
         ].join("\n"),
     );
-    return {root, argsFile};
+    return {root, argsFile, callsFile};
 }
 
 function inWorkspace<T>(fixture: T, workspace: string): T {
     return JSON.parse(JSON.stringify(fixture).replaceAll("/repo", workspace)) as T;
 }
+
+test("实际收集和运行都在启动前拒绝未知、无效、不支持的安装包版本", async (t) => {
+    for (const packageVersion of [
+        undefined,
+        null,
+        120,
+        "",
+        "unknown",
+        "1.2",
+        "1.2.0 extra",
+        "01.2.0",
+        "1.2.0+build..1",
+        "1.1.3",
+        "v1.1.9+build.3",
+        "1.2.0-beta.1",
+        "1.9.0-rc.1+build.3",
+        "2.0.0",
+        "v2.0.0+build.3",
+        "3.0.0",
+    ]) {
+        const {root, argsFile, callsFile} = fakeWorkspace(t, (workspace: string) => fixtureResult(workspace), {
+            packageVersion,
+        });
+        const listed = await collectTests({
+            workspaceRoot: root,
+            nodePath: process.execPath,
+            configPath: "custom/config.mts",
+        });
+        assert.equal(listed.doc, null, String(packageVersion));
+        assert.ok(listed.stderr.includes(MAA_TOOLS_VERSION_RANGE), listed.stderr);
+        assert.match(listed.stderr, /未知|无效|不兼容/);
+        assert.ok(listed.stderr.includes(path.join(root, "node_modules", "@nekosu", "maa-tools", "package.json")));
+        assert.equal(existsSync(argsFile), false, `收集不得启动 ${String(packageVersion)}`);
+        const outcome = await startMaaToolsRun({
+            workspaceRoot: root,
+            nodePath: process.execPath,
+            configPath: "custom/config.mts",
+            testFiles: ["tests/test_a.json"],
+        }).done;
+        assert.equal(outcome.errorCode, "maa-tools-unavailable", String(packageVersion));
+        assert.ok(outcome.error?.includes(MAA_TOOLS_VERSION_RANGE), outcome.error);
+        assert.equal(outcome.result, null);
+        assert.equal(outcome.caseResults.size, 0);
+        assert.equal(existsSync(argsFile), false, `运行不得启动 ${String(packageVersion)}`);
+        assert.equal(existsSync(callsFile), false, "不得用 --version 绕过包版本检查");
+    }
+});
+
+test("安装包清单缺失或JSON损坏时，真实收集和运行都不启动test", async (t) => {
+    for (const missing of [
+        false,
+        true,
+    ]) {
+        const {root, callsFile} = fakeWorkspace(t, (workspace: string) => fixtureResult(workspace));
+        const packageFile = path.join(root, "node_modules", "@nekosu", "maa-tools", "package.json");
+        if (missing) rmSync(packageFile);
+        else writeFileSync(packageFile, "{broken}");
+        const listed = await collectTests({workspaceRoot: root, nodePath: process.execPath});
+        assert.equal(listed.doc, null);
+        assert.match(listed.stderr, /安装包版本未知或无法读取/);
+        const outcome = await startMaaToolsRun({
+            workspaceRoot: root,
+            nodePath: process.execPath,
+            testFiles: ["tests/test_a.json"],
+        }).done;
+        assert.equal(outcome.errorCode, "maa-tools-unavailable");
+        assert.match(outcome.error!, /安装包版本未知或无法读取/);
+        assert.equal(existsSync(callsFile), false);
+    }
+});
+
+test("受支持稳定版的实际收集与运行保留同一自定义配置和选择，不额外查询版本", async (t) => {
+    for (const packageVersion of [
+        "1.2.0",
+        "v1.2.0",
+        "1.2.0+build-with-hyphen",
+        "v1.9.0+build.7",
+        "1.999.999",
+    ]) {
+        const {root, callsFile} = fakeWorkspace(t, (workspace: string) => fixtureResult(workspace, [1]), {
+            packageVersion,
+        });
+        const request = {workspaceRoot: root, nodePath: process.execPath, configPath: "custom/config.mts"};
+        const listed = await collectTests({...request, files: ["tests/test_a.json"]});
+        assert.equal(listed.doc?.files[0].file, "tests/test_a.json", listed.stderr);
+        assert.deepEqual(
+            listed.doc?.files[0].cases.map((item) => item.index),
+            [1],
+        );
+        const outcome = await startMaaToolsRun({...request, testFiles: ["tests/test_a.json"], caseIndex: 1}).done;
+        assert.equal(outcome.error, undefined, `${packageVersion}: ${outcome.error}`);
+        assert.equal(outcome.caseResults.get("tests/test_a.json#1")?.verdict, "pass");
+        assert.doesNotMatch(
+            JSON.stringify([
+                listed.doc,
+                outcome.result,
+            ]),
+            /"schemaVersion"/,
+        );
+        assert.deepEqual(
+            readFileSync(callsFile, "utf8")
+                .trimEnd()
+                .split("\n")
+                .map((line) => JSON.parse(line)),
+            [
+                [
+                    "test",
+                    "--list",
+                    "--json",
+                    "--file",
+                    "tests/test_a.json",
+                    "custom/config.mts",
+                ],
+                [
+                    "test",
+                    "--jsonl",
+                    "--file",
+                    "tests/test_a.json",
+                    "--case",
+                    "1",
+                    "custom/config.mts",
+                ],
+            ],
+        );
+    }
+});
 
 test("单次JSON运行不读取配置或本地测试文件；传同一份文件选择与配置", async (t) => {
     const {root, argsFile} = fakeWorkspace(t, (workspace: string) => fixtureResult(workspace, [1]));
@@ -105,14 +238,15 @@ test("顶层失败与文件通过矛盾时清空所有可通过Map", async (t) =
     assert.equal(outcome.caseResults.size, 0);
 });
 
-test("遗漏所选用例或未知schema不返回部分通过", async (t) => {
+test("遗漏所选用例或缺少必需字段不返回部分通过", async (t) => {
     for (const mode of [
         "omitted",
-        "version",
+        "missing-groups",
     ] as const) {
         const {root} = fakeWorkspace(t, (workspace: string) => {
             const doc = fixtureResult(workspace);
-            return mode === "version" ? {...doc, schemaVersion: 2} : doc;
+            if (mode === "missing-groups") delete (doc as unknown as Record<string, unknown>).groups;
+            return doc;
         });
         const outcome = await startMaaToolsRun({
             workspaceRoot: root,
@@ -136,7 +270,6 @@ test("遗漏所选用例或未知schema不返回部分通过", async (t) => {
 
 test("按错误代码区别配置启动失败与无匹配，不猜英文reason", async (t) => {
     const {root} = fakeWorkspace(t, {
-        schemaVersion: 1,
         status: "error",
         errorCode: "config-load-failed",
         reason: "no tests matched arbitrary text",
@@ -209,7 +342,6 @@ test("取消丢弃半截结果；进程无法启动有明确错误代码", async
 
 test("实际发现传--list --json、文件过滤与自定义配置，并转换绝对file", async (t) => {
     const {root, argsFile} = fakeWorkspace(t, (workspace: string) => ({
-        schemaVersion: 1,
         files: fixtureResult(workspace).files,
     }));
     const listed = await collectTests({
@@ -228,7 +360,6 @@ test("实际发现传--list --json、文件过滤与自定义配置，并转换�
         "custom.mts",
     ]);
     const error = fakeWorkspace(t, {
-        schemaVersion: 1,
         status: "error",
         files: [],
         groups: [],
@@ -264,7 +395,6 @@ test("进程非零退出不得接受passed结果", async (t) => {
 
 function liveCase(workspace: string, index: number): TestRunEvent {
     return {
-        schemaVersion: 1,
         type: "case-result",
         origin: {file: `${workspace}/tests/test_a.json`, case: index},
         result: fixtureResult(workspace, [index]),
@@ -273,7 +403,6 @@ function liveCase(workspace: string, index: number): TestRunEvent {
 
 function liveFile(workspace: string): TestRunEvent {
     return {
-        schemaVersion: 1,
         type: "file-result",
         file: `${workspace}/tests/test_a.json`,
         result: fixtureResult(workspace),
@@ -351,7 +480,7 @@ test("非法完整记录终止进程并清除此前已发布的通过，不抛�
     const {root} = fakeWorkspace(t, fixtureResult(), {
         events: (workspace) => [
             liveCase(workspace, 1),
-            {schemaVersion: 2, type: "case-started", origin: {file: `${workspace}/tests/test_a.json`, case: 3}},
+            {type: "case-started", origin: {file: `${workspace}/tests/test_a.json`}},
         ],
         hang: true,
     });
@@ -435,7 +564,7 @@ test("相同重复事件只交付一次，缺失事件不阻止接受完整最�
 });
 
 function finalLine(workspace: string): string {
-    return JSON.stringify({schemaVersion: 1, type: "run-result", result: fixtureResult(workspace)}) + "\n";
+    return JSON.stringify({type: "run-result", result: fixtureResult(workspace)}) + "\n";
 }
 
 test("JSONL处理中文UTF8拆字节、CRLF及一块多行", async (t) => {
@@ -479,10 +608,11 @@ test("JSONL单行超过64KB且跨多个块仍读取完整报告", async (t) => {
     assert.equal(outcome.result?.reason, reason);
 });
 
-test("未知header、完整坏行、重复终条或终条后记录均清除已发布通过", async (t) => {
+test("缺少最终报告字段、未知类型、完整坏行或终条后记录均清除已发布通过", async (t) => {
     for (const kind of [
         "bad-json",
-        "schema",
+        "missing-result",
+        "unknown-status",
         "type",
         "duplicate-final",
         "after-final",
@@ -494,16 +624,20 @@ test("未知header、完整坏行、重复终条或终条后记录均清除已�
                 const invalid =
                     kind === "bad-json"
                         ? "{broken}\n"
-                        : kind === "schema"
-                          ? JSON.stringify({schemaVersion: 2, type: "run-result", result: fixtureResult(workspace)}) +
-                            "\n"
-                          : kind === "type"
-                            ? '{"schemaVersion":1,"type":"unknown"}\n'
-                            : kind === "duplicate-final"
-                              ? finalLine(workspace) + finalLine(workspace)
-                              : kind === "after-final"
-                                ? finalLine(workspace) + first
-                                : "\n";
+                        : kind === "missing-result"
+                          ? JSON.stringify({type: "run-result"}) + "\n"
+                          : kind === "unknown-status"
+                            ? JSON.stringify({
+                                  type: "run-result",
+                                  result: {...fixtureResult(workspace), status: "success"},
+                              }) + "\n"
+                            : kind === "type"
+                              ? '{"type":"unknown"}\n'
+                              : kind === "duplicate-final"
+                                ? finalLine(workspace) + finalLine(workspace)
+                                : kind === "after-final"
+                                  ? finalLine(workspace) + first
+                                  : "\n";
                 return first + invalid;
             },
         });
@@ -534,7 +668,7 @@ test("正常退出缺少run-result、终条无换行或尾部截断均报错", a
                     : kind === "no-newline"
                       ? finalLine(workspace).trimEnd()
                       : kind === "truncated"
-                        ? '{"schemaVersion":1,'
+                        ? '{"type":'
                         : finalLine(workspace) + "{"),
         });
         const outcome = await startMaaToolsRun({
@@ -574,9 +708,7 @@ test("用户取消留下的半行不抹掉完成事实，完整坏行仍优先�
         const {root} = fakeWorkspace(t, null, {
             hang: true,
             rawStream: (workspace) =>
-                JSON.stringify(liveCase(workspace, 1)) +
-                "\n" +
-                (completeBadLine ? "{broken}\n" : '{"schemaVersion":1,'),
+                JSON.stringify(liveCase(workspace, 1)) + "\n" + (completeBadLine ? "{broken}\n" : '{"type":'),
         });
         let flow: ReturnType<typeof startMaaToolsRun>;
         flow = startMaaToolsRun(
@@ -593,7 +725,7 @@ test("用户取消留下的半行不抹掉完成事实，完整坏行仍优先�
 test("信号终止且末尾半行时保留已完成事实", async (t) => {
     const {root} = fakeWorkspace(t, null, {
         terminate: true,
-        rawStream: (workspace) => JSON.stringify(liveCase(workspace, 1)) + '\n{"schemaVersion":1,',
+        rawStream: (workspace) => JSON.stringify(liveCase(workspace, 1)) + '\n{"type":',
     });
     const outcome = await startMaaToolsRun({
         workspaceRoot: root,
@@ -645,7 +777,7 @@ test("取消保留已经收到file-result的空选择跳过，不误报协议错
             result.groups = [];
             result.files[0].verdict = "skipped";
             result.files[0].reason = "no-cases-selected";
-            return [{schemaVersion: 1, type: "file-result", file: result.files[0].file, result}];
+            return [{type: "file-result", file: result.files[0].file, result}];
         },
     });
     let flow: ReturnType<typeof startMaaToolsRun>;
