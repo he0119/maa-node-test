@@ -98,7 +98,9 @@ export class NodeTestExplorer implements vscode.Disposable {
         /** 发现测试文件后，把它们的控制器组合交出去（用于后台预热节点索引） */
         private readonly onScopesDiscovered: (scopes: readonly (readonly string[])[]) => void = () => {},
     ) {
-        this.controller = vscode.tests.createTestController("maaNodeTest", "Maa 节点测试");
+        // 显示名跟扩展在商店里的名字用同一个：面板这一行就是「这批节点是哪个插件加的」，
+        // 名字不一致时用户拿着它去扩展列表里对不上号
+        this.controller = vscode.tests.createTestController("maaNodeTest", "Maa Node Test");
         this.controller.refreshHandler = () => this.refresh();
 
         // 只提供「运行」一种 profile，够用且不制造概念
@@ -152,16 +154,7 @@ export class NodeTestExplorer implements vscode.Disposable {
 
         const missing = this.reportMissingImages(entries);
 
-        const dirItems = new Map<string, vscode.TestItem>();
-        const dirCounts = new Map<string, number>();
-        for (const entry of entries) this.addTestFile(entry, dirItems, dirCounts, missing.get(entry.relativePath));
-
-        for (const [
-            dirPath,
-            item,
-        ] of dirItems) {
-            item.description = `含 ${dirCounts.get(dirPath) ?? 0} 个测试文件`;
-        }
+        for (const entry of entries) this.addTestFile(entry, missing.get(entry.relativePath));
 
         // 顺手把这些文件声明的控制器组合交出去，让后台预热节点索引（不然第一次补全要等 350ms）
         this.onScopesDiscovered(entries.map((entry) => entry.parsed.configs.controller));
@@ -261,26 +254,25 @@ export class NodeTestExplorer implements vscode.Disposable {
         return byFile;
     }
 
-    /** 一个测试文件 → 目录节点（按需创建）+ 文件节点 + 用例节点 */
-    private addTestFile(
-        entry: TestFileEntry,
-        dirItems: Map<string, vscode.TestItem>,
-        dirCounts: Map<string, number>,
-        missingImages?: readonly MissingImageWarning[],
-    ): void {
+    /**
+     * 一个测试文件 → 目录节点（按需创建）+ 文件节点 + 用例节点。
+     * 目录节点只写目录名，不加「含 N 个测试文件」的灰字：图标已经能看出有没有测试，
+     * 灰字只会把一行行目录挤长，信息却没有用。
+     */
+    private addTestFile(entry: TestFileEntry, missingImages?: readonly MissingImageWarning[]): void {
         const segments = folderSegments(entry.relativePath);
 
         let parent: vscode.TestItemCollection = this.controller.items;
         let dirPath = "";
         for (const segment of segments) {
             dirPath = dirPath ? `${dirPath}/${segment}` : segment;
-            dirCounts.set(dirPath, (dirCounts.get(dirPath) ?? 0) + 1);
 
-            let dirItem = dirItems.get(dirPath);
+            // 目录节点 id 只由层级路径决定，所以直接在父节点里按 id 找，不用另外记一张表
+            const dirId = `maaNodeTest#dir:${dirPath}`;
+            let dirItem = parent.get(dirId);
             if (!dirItem) {
-                dirItem = this.controller.createTestItem(`maaNodeTest#dir:${dirPath}`, segment);
+                dirItem = this.controller.createTestItem(dirId, segment);
                 dirItem.canResolveChildren = false;
-                dirItems.set(dirPath, dirItem);
                 parent.add(dirItem);
             }
             parent = dirItem.children;
