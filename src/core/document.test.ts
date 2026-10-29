@@ -125,3 +125,31 @@ test("isTestFilePath 只认 tests 目录下的 test_*.json(c)", () => {
     assert.equal(isTestFilePath("tests/Common/Button/test_close_button.json.bak"), false);
     assert.equal(isTestFilePath("test_close_button.json"), false);
 });
+
+test("解析可选的 imageRoot，不改变其他配置", () => {
+    for (const imageRoot of [
+        "RestaurantDaily",
+        "RestaurantDaily/Menu",
+        "",
+        ".",
+    ]) {
+        const parsed = parseTestDocument(
+            JSON.stringify({
+                configs: {controller: "Win32", resource: "官服", imageRoot},
+                cases: [],
+            }),
+        );
+        assert.equal(parsed.configs.imageRoot, imageRoot);
+        assert.deepEqual(parsed.configs.controller, ["Win32"]);
+        assert.deepEqual(parsed.problems, []);
+    }
+    for (const imageRoot of [
+        undefined,
+        null,
+        42,
+        ["RestaurantDaily"],
+    ]) {
+        const parsed = parseTestDocument(JSON.stringify({configs: {imageRoot}, cases: []}));
+        assert.equal(parsed.configs.imageRoot, undefined);
+    }
+});

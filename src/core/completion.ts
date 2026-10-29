@@ -24,8 +24,8 @@ export interface CompletionContext {
 export interface RepoData {
     controllers: readonly LoaderEntry[];
     resources: readonly LoaderEntry[];
-    /** 截图文件名；传入本文件声明的 controller，能收窄就收窄 */
-    images: (controllers: readonly string[]) => readonly string[];
+    /** 截图文件名；按本文件声明的 controller 和截图子目录查找 */
+    images: (controllers: readonly string[], imageRoot?: string) => readonly string[];
     /** pipeline 节点名；传本文件声明的 controller 后只算它们会加载的资源目录 */
     nodes: (controllers: readonly string[]) => readonly string[];
 }
@@ -106,6 +106,7 @@ export function candidatesFor(
     context: CompletionContext,
     data: RepoData,
     declared: readonly string[] = [],
+    imageRoot?: string,
 ): Candidate[] {
     const {path} = context;
 
@@ -133,7 +134,7 @@ export function candidatesFor(
     }
 
     if (fieldPath[0] === "cases" && field === "image") {
-        return data.images(declared).map((name) => ({label: name, kind: "image" as const}));
+        return data.images(declared, imageRoot).map((name) => ({label: name, kind: "image" as const}));
     }
 
     // hits 里的节点名：既可以写成字符串，也可以写成 { node: "..." }

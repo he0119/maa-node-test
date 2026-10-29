@@ -210,13 +210,17 @@ export class NodeTestExplorer implements vscode.Disposable {
         const workspace = resolveNodeTestWorkspace();
         if (!workspace) return byFile;
 
-        // 同一个图片名在一批文件里反复出现，扫描结果缓存一下，别每个用例都去 readdir
+        // 同一子目录里的同名图片复用扫描结果，不跨 imageRoot 混用。
         const cache = new Map<string, ReturnType<typeof locateImage>>();
-        const locate = (image: string): ReturnType<typeof locateImage> => {
-            const hit = cache.get(image);
+        const locate = (image: string, imageRoot?: string): ReturnType<typeof locateImage> => {
+            const key = JSON.stringify([
+                imageRoot ?? "",
+                image,
+            ]);
+            const hit = cache.get(key);
             if (hit) return hit;
-            const scanned = locateImage(workspace.testsetRoot, image);
-            cache.set(image, scanned);
+            const scanned = locateImage(workspace.testsetRoot, image, imageRoot);
+            cache.set(key, scanned);
             return scanned;
         };
 
@@ -226,7 +230,7 @@ export class NodeTestExplorer implements vscode.Disposable {
             const warnings = collectMissingImages({
                 cases: parsed.cases,
                 controllers: parsed.configs.controller,
-                locate,
+                locate: (image) => locate(image, parsed.configs.imageRoot),
                 resolvePlatform: this.resolveController,
             });
             if (warnings.length === 0) continue;

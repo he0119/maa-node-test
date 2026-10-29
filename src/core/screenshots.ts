@@ -1,7 +1,7 @@
-import {existsSync, readdirSync, statSync} from "node:fs";
+import {existsSync, readdirSync, realpathSync, statSync} from "node:fs";
 import * as path from "node:path";
 
-/** 测试集里的一级目录（平台）和二级目录（资源），dirPath 是这一层的绝对路径 */
+/** 截图目录的平台、资源归属，以及实际查找目录的绝对路径。 */
 export interface PlatformResourceDir {
     platform: string;
     /** 二级目录名；平台下没有子目录时是空字符串 */
@@ -43,13 +43,26 @@ export function scanTestsetDirs(testsetRoot: string): PlatformResourceDir[] {
     return result;
 }
 
-/**
- * 在测试集里按平台找同名截图，并把每个组合的结果（含 PNG 尺寸）一起返回。
- * image 里带路径分隔符属于坏数据，直接当找不到处理，避免越界读文件。
- */
-export function locateImage(testsetRoot: string, imageName: string): ImageLocation[] {
+/** 按测试文件声明的 imageRoot 定位截图目录，不递归寻找同名文件。 */
+export function scanImageDirs(testsetRoot: string, imageRoot = "."): PlatformResourceDir[] {
+    if (path.isAbsolute(imageRoot)) return [];
+    return scanTestsetDirs(testsetRoot).flatMap((dir) => {
+        const dirPath = path.resolve(dir.dirPath, imageRoot);
+        if (!isWithinDirectory(dir.dirPath, dirPath)) return [];
+        try {
+            if (!isWithinDirectory(realpathSync(dir.dirPath), realpathSync(dirPath))) return [];
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code !== "ENOENT" && code !== "ENOTDIR") return [];
+        }
+        return [{...dir, dirPath}];
+    });
+}
+
+/** 在声明的截图子目录中查找图片；image 保持为文件名，避免越界读取。 */
+export function locateImage(testsetRoot: string, imageName: string, imageRoot?: string): ImageLocation[] {
     if (!imageName || /[\\/]/.test(imageName)) return [];
-    return scanTestsetDirs(testsetRoot).map((dir) => {
+    return scanImageDirs(testsetRoot, imageRoot).map((dir) => {
         const candidate = path.join(dir.dirPath, imageName);
         if (!isFile(candidate)) {
             return {platform: dir.platform, resource: dir.resource, filePath: null, size: null};
@@ -61,6 +74,11 @@ export function locateImage(testsetRoot: string, imageName: string): ImageLocati
             size: readPngSizeFromFile(candidate),
         };
     });
+}
+
+function isWithinDirectory(directory: string, target: string): boolean {
+    const relative = path.relative(path.resolve(directory), target);
+    return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
 function isDirectory(target: string): boolean {

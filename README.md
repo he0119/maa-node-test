@@ -153,7 +153,9 @@ CloudADB-官服 失败
 
 预览默认宽 400 像素，高度按比例缩放；设置 `maaNodeTest.hoverImageWidth` 为 `0` 时按原图尺寸显示。远程环境中图片加载失败，可点「打开原图」。
 
-编辑辅助支持 MaaEnd 使用的 `<控制器目录>/<资源目录>/<图片>` 布局，并读取 `tests/scripts/loader.mts` 中的 `controllerMap`、`resourceMap` 字符串映射。没有映射时按同名目录处理。节点补全还会读取 `assets/interface.json` 和 pipeline 定义。
+编辑辅助支持 MaaEnd 使用的 `<控制器目录>/<资源目录>/<imageRoot>/<图片>` 布局，`configs.imageRoot` 是可选的相对截图子目录，可以包含多级目录；省略、空字符串或 `.` 表示直接使用资源目录。预览、图片跳转、图片名补全和缺图提示都使用这个子目录，`image` 仍填写文件名。例如 `imageRoot: "RestaurantDaily"` 会在各平台资源下的 `RestaurantDaily` 中查图，不会回退到其他目录的同名图片。
+
+编辑辅助读取 `tests/scripts/loader.mts` 中的 `controllerMap`、`resourceMap` 字符串映射。没有映射时按同名目录处理。节点补全还会读取 `assets/interface.json` 和 pipeline 定义。
 
 **这些辅助并不执行仓库的 loader。** 自定义图片路径、资源映射或加载方式可能导致预览、补全或黄线与运行不一致；黄线也不核对资源服是否完整匹配。请以 maa-tools 实际返回的图片路径和运行结果为准，不要仅靠黄线判断用例是否有效。
 

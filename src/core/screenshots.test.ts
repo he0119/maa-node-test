@@ -1,10 +1,12 @@
 import {strict as assert} from "node:assert";
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import * as path from "node:path";
 import {test} from "node:test";
 import {locateImage, orderImageLocations, scanTestsetDirs} from "./screenshots";
 import {readPngSizeFromFile} from "./png";
+import {parseTestDocument} from "./document";
+import {collectMissingImages} from "./missingImages";
 
 /** 造一个只有 PNG 头 + IHDR 的假文件，够 readPngSizeFromFile 读尺寸用了 */
 function fakePng(width: number, height: number): Buffer {
@@ -196,5 +198,87 @@ test("平台排序：别名按目录名对号入座", () => {
             "Win32",
             "ADB",
         ],
+    );
+});
+
+test("imageRoot 选择截图子目录，同名根目录图片不能代替子目录图片", (t) => {
+    const testset = makeTestset();
+    t.after(testset.dispose);
+    const folder = path.join(testset.root, "Win32", "Official_CN", "RestaurantDaily", "Menu");
+    mkdirSync(folder, {recursive: true});
+    const image = "帝江号_大世界.png";
+    const target = path.join(folder, image);
+    writeFileSync(target, fakePng(900, 500));
+    const locations = locateImage(testset.root, image, path.join("RestaurantDaily", "Menu"));
+    assert.deepEqual(
+        locations.filter((item) => item.filePath !== null).map((item) => item.filePath),
+        [target],
+    );
+    assert.deepEqual(locations.find((item) => item.filePath === target)?.size, {width: 900, height: 500});
+    assert.equal(locations.find((item) => item.platform === "Win32" && item.resource === "B服")?.filePath, null);
+});
+
+test("imageRoot 缺省、空字符串和点都使用原目录", (t) => {
+    const testset = makeTestset();
+    t.after(testset.dispose);
+    const expected = locateImage(testset.root, "帝江号_大世界.png");
+    assert.deepEqual(locateImage(testset.root, "帝江号_大世界.png", ""), expected);
+    assert.deepEqual(locateImage(testset.root, "帝江号_大世界.png", "."), expected);
+});
+
+test("解析的 imageRoot 用于预览位置和缺图检查，缺少子目录不会回退", (t) => {
+    const testset = makeTestset();
+    t.after(testset.dispose);
+    const folder = path.join(testset.root, "Win32", "Official_CN", "RestaurantDaily");
+    mkdirSync(folder, {recursive: true});
+    writeFileSync(path.join(folder, "a.png"), fakePng(100, 80));
+    const document = parseTestDocument(
+        JSON.stringify({
+            configs: {controller: "Win32", resource: "官服", imageRoot: "RestaurantDaily"},
+            cases: [{image: "a.png", hits: []}],
+        }),
+    );
+    const input = {
+        cases: document.cases,
+        controllers: document.configs.controller,
+        locate: (image: string) => locateImage(testset.root, image, document.configs.imageRoot),
+    };
+    assert.deepEqual(collectMissingImages(input), []);
+    const missing = collectMissingImages({
+        ...input,
+        locate: (image: string) => locateImage(testset.root, image, "MissingFolder"),
+    });
+    assert.deepEqual(missing[0].platforms, [{platform: "Win32", hasDirectory: true}]);
+});
+
+test("imageRoot 不能使用绝对路径或离开平台资源目录", (t) => {
+    const testset = makeTestset();
+    t.after(testset.dispose);
+    writeFileSync(path.join(testset.root, "Win32", "outside.png"), fakePng(10, 10));
+    for (const imageRoot of [
+        "..",
+        path.join("nested", "..", ".."),
+        path.join(testset.root, "Win32"),
+    ]) {
+        assert.deepEqual(locateImage(testset.root, "outside.png", imageRoot), []);
+    }
+});
+
+test("imageRoot 目录链接不能访问其他平台资源目录", (t) => {
+    const testset = makeTestset();
+    t.after(testset.dispose);
+    const target = path.join(testset.root, "ADB", "Official_CN");
+    const link = path.join(testset.root, "Win32", "Official_CN", "linked");
+    try {
+        symlinkSync(target, link, "junction");
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+        t.skip("当前系统不允许创建目录链接");
+        return;
+    }
+    const found = locateImage(testset.root, "别的图.png", "linked");
+    assert.equal(
+        found.some((item) => item.filePath !== null),
+        false,
     );
 });

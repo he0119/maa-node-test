@@ -27,9 +27,10 @@ export class NodeTestCompletionProvider implements vscode.CompletionItemProvider
         const context = completionContextAt(text, document.offsetAt(position));
         if (!context) return undefined;
 
-        // 已经声明了平台时按平台收窄截图列表 —— 补全里出现的图，应该就是这个文件真会跑到的图
-        const declared = parseTestDocument(text).configs.controller;
-        const candidates = candidatesFor(context, index, declared);
+        // 按本文件声明的平台和子目录查找截图候选。
+        const configs = parseTestDocument(text).configs;
+        const declared = configs.controller;
+        const candidates = candidatesFor(context, index, declared, configs.imageRoot);
         if (candidates.length === 0) return undefined;
 
         return candidates.map((candidate) => toCompletionItem(candidate, context, index, declared));

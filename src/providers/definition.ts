@@ -55,7 +55,7 @@ export class NodeTestDefinitionProvider implements vscode.DefinitionProvider {
 
 /**
  * 光标落在 `image` 字段上时，指向对应的截图文件。
- * 多个平台都有这张图时只用声明顺序里的第一张，其余的在悬浮里点「打开原图」。
+ * 多个平台都有这张图时，按声明顺序返回各位置，供跳转列表选择。
  */
 function imageLocation(text: string, offset: number, index: RepoIndex | null): vscode.Location[] | undefined {
     const parsed = parseTestDocument(text);
@@ -70,7 +70,7 @@ function imageLocation(text: string, offset: number, index: RepoIndex | null): v
         index ? resolveControllerDir(index.maps(), controller) : controller;
 
     const ordered = orderImageLocations(
-        locateImage(workspace.testsetRoot, field.value),
+        locateImage(workspace.testsetRoot, field.value, parsed.configs.imageRoot),
         parsed.configs.controller,
         resolvePlatform,
     ).filter((location) => location.filePath !== null);

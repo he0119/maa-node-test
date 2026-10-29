@@ -221,7 +221,9 @@ reason?: string
 
 [core/document.ts](../../../src/core/document.ts)、[hits.ts](../../../src/core/hits.ts) 和 [completion.ts](../../../src/core/completion.ts) 解析编辑器文本，允许宽松处理注释和未完成内容。maa-tools 读取运行文件时允许注释，不允许尾逗号；两者用途不同，不宣称解析行为完全相同。
 
-图片预览和黄线根据 `testsetDir` 扫描一级平台、二级资源目录；[loaderMaps.ts](../../../src/core/loaderMaps.ts) 只读 `tests/scripts/loader.mts` 中 `controllerMap`、`resourceMap` 的对象字面量字符串。它不是 TypeScript 求值器，也不执行 loader。缺图诊断只比较声明控制器是否有图，不核对资源服；带子目录的 image、自定义 imageRoot 或动态映射可能与实际运行不同。
+图片预览、图片跳转、文件名补全和黄线根据 `testsetDir` 扫描一级平台、二级资源目录，再使用当前文件声明的 `configs.imageRoot` 子目录。省略、空字符串和 `.` 使用原资源目录；支持相对多级目录，拒绝绝对路径、离开资源目录的路径和指向资源目录之外的目录链接。`image` 保持为文件名，指定子目录缺图时不回退到其他目录。文件名索引的修改时间包含所选子目录，缺图扫描缓存同时区分 `imageRoot` 与图片名。
+
+[loaderMaps.ts](../../../src/core/loaderMaps.ts) 只读 `tests/scripts/loader.mts` 中 `controllerMap`、`resourceMap` 的对象字面量字符串，不执行 loader。缺图诊断只比较声明控制器是否有图，不核对资源服；绝对或目录外的 `imageRoot`、带子目录的 `image` 以及动态映射可能与实际运行不同。
 
 因此，运行缺图信息必须使用返回的 `imagePath`，排错应检查配置里的 `cwd`、`casesCwd`、`imageRoot` 和用例 `image`。工作区根不一定是截图根；改变编辑辅助的 `testsetDir` 不改变运行路径。
 

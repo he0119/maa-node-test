@@ -4,8 +4,7 @@ import type {ImageLocation} from "./screenshots";
 /**
  * 一条用例缺截图的警告。探测阶段（扫测试文件时）就能算出来，不用等跑测试。
  *
- * 为什么要提前警告：`maa-tools` 遇到不存在的截图只打印跳过、跳过即通过，所以缺图的用例跑完是「绿的」。
- * 等跑完再看就晚了 —— 写用例的时候就应该知道「这个声明的平台其实没有截图」。
+ * 写用例时提前提示声明平台缺少截图；实际运行路径和结论仍以 maa-tools 返回为准。
  */
 export interface MissingImageWarning {
     /** 用例下标，和测试面板的节点、runner 的 --case 一致 */

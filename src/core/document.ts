@@ -9,6 +9,8 @@ export interface TestConfigs {
     name?: string;
     resource: string[];
     controller: string[];
+    /** 相对平台和资源目录的截图子目录。 */
+    imageRoot?: string;
 }
 
 /** image 字段在文件里的位置。Hover 要靠它把范围限定在值上，否则整块都会闪。 */
@@ -84,6 +86,10 @@ export function parseTestDocument(text: string): TestDocument {
         }
         configs.resource = toStringList(findNodeAtLocation(configsNode, ["resource"]));
         configs.controller = toStringList(findNodeAtLocation(configsNode, ["controller"]));
+        const imageRootNode = findNodeAtLocation(configsNode, ["imageRoot"]);
+        if (typeof imageRootNode?.value === "string") {
+            configs.imageRoot = imageRootNode.value;
+        }
     }
 
     const casesNode = findNodeAtLocation(root, ["cases"]);
