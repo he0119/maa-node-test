@@ -39,7 +39,7 @@ Maa 节点测试的 VS Code 插件。它调用被测仓库里的 `maa-tools` 收
 
 插件使用被测仓库安装的 `@nekosu/maa-tools`，不另外安装一份。收集与运行读取这份包的 `package.json` 检查版本，不为每次操作额外执行 `--version`。允许版本号带 `v` 前缀或构建元数据，不接受预发布版、版本未知或格式无效的版本。版本在支持范围内时，命令仍须成功启动，返回内容仍须通过必需结构、记录 `type`、来源覆盖和进度与最终结果一致性检查。
 
-maa-tools `1.2.0` 尚未发布到 npm。1.x 内的 JSON 兼容规则见 [reference](.agents/skills/maa-node-test-dev/reference.md#包版本与-json-兼容)。
+1.x 内的 JSON 兼容规则见 [reference](.agents/skills/maa-node-test-dev/reference.md#包版本与-json-兼容)。
 
 运行测试会由 maa-tools 写入识别日志，默认在被测仓库的 `debug` 目录下。插件不会替你安装依赖或改写测试文件。
 
@@ -47,7 +47,7 @@ maa-tools `1.2.0` 尚未发布到 npm。1.x 内的 JSON 兼容规则见 [referen
 
 ### 正式版
 
-还没发布到市场。发布之后可以在扩展面板中搜索「Maa Node Test」，或从 GitHub Release 下载 `.vsix`：
+从 [GitHub Releases](https://github.com/he0119/maa-node-test/releases) 下载 `.vsix`，在 VS Code 中使用「从 VSIX 安装」或执行：
 
 ```bash
 code --install-extension maa-node-test-<版本>.vsix
