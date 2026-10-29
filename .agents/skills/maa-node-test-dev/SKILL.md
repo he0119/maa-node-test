@@ -25,21 +25,21 @@ description: 修改 Maa 节点测试 VS Code 插件时使用。覆盖编辑辅�
 
 三个运行入口（CodeLens、命令、测试面板）共用 [testRunner.ts](../../../src/testRunner.ts) 的 `startTestRun()` 和 [maatools/run.ts](../../../src/maatools/run.ts) 的 `startMaaToolsRun()`，统一使用 `test --jsonl`：stdout 每行一个 JSON，三类进度之后，最后唯一一条 `run-result` 携带完整报告；stderr 是日志。`onProgress` 只决定是否通知界面，所有运行都读取并校验同一标准输出流。
 
-`case-result` 要等该来源本次实际计划的全部平台完成，`file-result` 要等文件全部所选用例完成；二者都带可完整校验的范围快照，只包含对应范围的 `files`。普通 `--json` 仍可单独获取一份最终报告；扩展发现用 `--list --json` 读取一份清单，单独 `--list` 供人阅读，两种收集都不初始化 MaaFramework。
+`case-result` 要等该来源本次实际计划的全部平台完成，`file-result` 要等文件全部所选用例完成；二者都带可完整校验的范围快照，只包含对应范围的 `files`。普通 `--json` 可单独获取一份最终报告；扩展发现用 `--list --json` 读取一份清单，单独 `--list` 供人阅读，两种收集都不初始化 MaaFramework。
 
-公开 `TestRunResult` 只有 `status`、`files`、`durationMs`、可选 `errorCode`/`reason`，无 `groups` 和 `schemaVersion`。每次平台结果只在文件用例的 `platforms[].result` 出现；SDK 内部仍按组展开、固定节点、调度和并行判定，文本日志保留组显示。只支持文件测试，展开后的 `TestCases.cases.origin` 与 `TestCaseRunResult.origin` 在类型和运行时都必填，关联实际测试 JSON 文件的绝对路径与原始下标。普通 JSON 不用手写 origin，文件加载函数自动补齐；自定义 loader 必须保留，动态生成的展开对象也须关联实际文件与下标。缺少、无效或无法对应文件与下标的 origin 在加载计划阶段报 `test-source-invalid`，不进入识别。
+公开 `TestRunResult` 由 `status`、`files`、`durationMs` 和可选的 `errorCode`、`reason` 构成。平台结果位于文件用例的 `platforms[].result`；SDK 按执行组展开、固定节点、调度和并行判定，文本日志显示组名和结果。只支持文件测试，展开后的 `TestCases.cases.origin` 与 `TestCaseRunResult.origin` 在类型和运行时都必填，关联实际测试 JSON 文件的绝对路径与原始下标。普通 JSON 不用手写 origin，文件加载函数自动补齐；自定义 loader 必须保留，动态生成的展开对象也须关联实际文件与下标。缺少、无效或无法对应文件与下标的 origin 在加载计划阶段报 `test-source-invalid`，不进入识别。
 
 [maatools/progress.ts](../../../src/maatools/progress.ts) 保存已完成事实，检查事件、重复和最终对账。相同重复消息不重新发布，矛盾消息报协议错误；没有收到的事件可由最终 JSON 补全。取消保留已校验的完成项、未完成项标跳过，协议错误不能因取消而被忽略。
 
-没有独立运行脚本，也不解析人类日志来判断成败。扩展只检查结果格式与完整性、转换中文文案和 VS Code 对象，不重复测试文件结构校验或重新计算结论。收集和运行读取已安装包的版本，不为每次操作额外执行 `--version`；支持稳定版 `>=1.2.0 <2.0.0`，允许 `v` 前缀和构建元数据，不接受预发布、未知或格式无效的版本。包版本通过后仍须检查命令启动与实际数据。
+扩展检查结果格式与完整性、转换中文文案和 VS Code 对象；测试文件结构校验、识别与结果判定由 maa-tools 负责。收集和运行读取已安装包的版本，不为每次操作额外执行 `--version`；支持稳定版 `>=1.2.0 <2.0.0`，允许 `v` 前缀和构建元数据，不接受预发布、未知或格式无效的版本。包版本通过后仍须检查命令启动与实际数据。
 
-版本用左侧 `StatusBarItem`，与 MaaSupport/MaaFramework 一样使用默认优先级；被测仓库中常显，点击整项刷新，悬浮查看完整来源。状态栏优先使用 `--version`，版本查询与兼容提示共用结果，并保留自动刷新、防抖和迟到保护。包声明不能在查询失败时证明命令可运行。JSON 兼容变更按 maa-tools 的包主版本管理，规则见 [reference](reference.md#包版本与-json-兼容)。
+版本用左侧 `StatusBarItem`，与 MaaSupport/MaaFramework 一样使用默认优先级；被测仓库中常显，点击整项刷新，悬浮查看完整来源。状态栏优先使用 `--version`，版本查询与兼容提示共用结果，支持自动刷新、防抖和迟到保护。包声明不能在查询失败时证明命令可运行。JSON 兼容变更按 maa-tools 的包主版本管理，规则见 [reference](reference.md#包版本与-json-兼容)。
 
 本地文本解析与截图扫描服务于编辑辅助，可处理未保存文本，不能据此推定实际会运行哪些测试。自定义 loader、图片根目录和资源映射可能超出这些辅助支持的约定，文案必须说明这一点。
 
 ## 修改位置
 
-逐文件职责见 [reference](reference.md#文件职责)，职责说明集中放在文档，源码注释解释局部约束。`NodeTestRunner`、`NodeTestExplorer` 和 `MaaToolsVersionStatus` 分别保留在对应宿主文件中；机器数据类型不放到 VS Code 宿主层。
+逐文件职责见 [reference](reference.md#文件职责)，职责说明集中放在文档，源码注释解释局部约束。`NodeTestRunner`、`NodeTestExplorer` 和 `MaaToolsVersionStatus` 由对应宿主文件定义；机器数据类型不放到 VS Code 宿主层。
 
 | 修改内容 | 主要位置 | 需要同步 |
 | --- | --- | --- |
