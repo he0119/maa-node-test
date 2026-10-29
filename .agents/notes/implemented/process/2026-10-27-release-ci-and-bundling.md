@@ -13,7 +13,8 @@ VSIX 需要包含扩展运行依赖。pnpm 的链接布局可能让 vsce 使用 
 - VSIX 包含扩展清单、README、图标、许可证和 `dist`，不带源码、单测、插件自己的 `node_modules` 或被测仓库依赖。
 - 检查工作流在向 main 推送或提 PR 时运行类型检查、构建、测试和试打包。发布工作流从 main 手动触发，检查仍为最新提交及版本标签是否可用。
 - 发布工作流先创建标签与 GitHub Release、上传 VSIX，再通过官方命令发布 Marketplace 和可选的 Open VSX。市场发布失败时，已生成的版本包仍可下载排查。
-- Marketplace 使用 Trusted Publishing 和短期身份凭据；Open VSX 的 token 来自仓库 secret，未配置则跳过。发布前必须配置对应服务的发布权限。
+- Marketplace 使用 Trusted Publishing 和短期身份凭据，发布工具使用已修复令牌交换请求的 vsce 4.1.0 及以上版本；Open VSX 的 token 来自仓库 secret，未配置则跳过。发布前必须配置对应服务的发布权限。
+- `publish_existing` 模式只读取当前版本的 GitHub Release 附件，核对包名、publisher 和版本后重试市场上传。该任务只有仓库读取与申请短期身份凭据的权限，不重新构建或覆盖已发布版本。
 
 ## Alternatives considered
 

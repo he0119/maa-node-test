@@ -15,6 +15,11 @@ name: Release
 # vsix 能从 Release 下载后手动上传。
 on:
   workflow_dispatch:
+    inputs:
+      publish_existing:
+        description: 仅上传现有 GitHub Release 中的同版本安装包
+        type: boolean
+        default: false
 
 permissions:
   contents: write # 打标签、建 Release 需要写权限
@@ -22,6 +27,7 @@ permissions:
 
 jobs:
   release:
+    if: ${{ !inputs.publish_existing }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -114,6 +120,58 @@ jobs:
         run: pnpm exec vsce publish --packagePath dist/*.vsix --oidc --skip-duplicate
 
       # 可选：VSCodium / Open VSX 用户从这里装。没配 token 就跳过
+      - name: 发布到 Open VSX
+        if: ${{ env.OPEN_VSX_TOKEN != '' }}
+        run: pnpm dlx ovsx@1.3.0 publish dist/*.vsix --skip-duplicate
+        env:
+          OVSX_PAT: ${{ secrets.OPEN_VSX_TOKEN }}
+
+  publish-existing:
+    if: ${{ inputs.publish_existing }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 pnpm 和 Node
+        uses: pnpm/setup@v3
+        with:
+          version: 12
+          runtime: node@22
+          cache: true
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 下载并核对已有版本的 VSIX
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::请从 main 分支上传正式版本"
+            exit 1
+          fi
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          gh release download "v$version" --pattern "$name-$version.vsix" --dir dist
+          unzip -p "dist/$name-$version.vsix" extension/package.json | node -e '
+            const assert = require("node:assert/strict");
+            const fs = require("node:fs");
+            const expected = require("./package.json");
+            const actual = JSON.parse(fs.readFileSync(0, "utf8"));
+            for (const key of ["name", "publisher", "version"]) {
+              assert.equal(actual[key], expected[key]);
+            }
+          '
+
+      - name: 通过 OIDC 发布到 Visual Studio Marketplace
+        run: pnpm exec vsce publish --packagePath dist/*.vsix --oidc --skip-duplicate
+
       - name: 发布到 Open VSX
         if: ${{ env.OPEN_VSX_TOKEN != '' }}
         run: pnpm dlx ovsx@1.3.0 publish dist/*.vsix --skip-duplicate

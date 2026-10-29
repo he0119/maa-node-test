@@ -282,8 +282,10 @@ code --install-extension dist/maa-node-test-<版本>.vsix
 
 使用 `GITHUB_TOKEN` 创建的标签不会再触发其他工作流，所以建标签与发布在同一次手动运行中完成。版本更新本身也通过 PR，不直接向默认分支提交。
 
-Marketplace 使用 `vsce publish --oidc`，需要 publisher 的 Trusted Publishing 策略和工作流的 `id-token: write` 权限。Open VSX 使用仓库 secret `OPEN_VSX_TOKEN`，未配置时跳过。不要把密钥写进源码。
+Marketplace 使用 `vsce publish --oidc`，发布工具须为 4.1.0 或更高版本，需要 publisher 的 Trusted Publishing 策略和工作流的 `id-token: write` 权限。Open VSX 使用仓库 secret `OPEN_VSX_TOKEN`，未配置时跳过。不要把密钥写进源码。
 
-GitHub Release 在发布市场之前创建：市场鉴权不可用或策略尚未配置时，仍可下载已生成的 VSIX，排查后重跑，或由维护者手动上传。是否支持某项发布功能应以当前服务响应为准，不把历史预计上线日期写成长期前提。
+GitHub Release 在发布市场之前创建。若只需重试市场上传，从 main 触发 `Release` 时选择 `publish_existing`：工作流下载当前扩展版本已有的 VSIX，核对包名、publisher 和版本后上传；这个模式只有仓库读取权限，不构建、不创建标签，也不改写 Release 附件。
+
+令牌交换报 `No api-version was supplied` 时，先核对锁文件实际安装的 vsce 版本。4.1.0 的请求包含 `api-version=7.2-preview.1`，并使用 `FederatedToken` 认证头，接口要求见[官方修复](https://github.com/microsoft/vscode-vsce/pull/1337)。是否支持某项发布功能应以当前服务响应为准，不把历史预计上线日期写成长期前提。
 
 pnpm 允许依赖执行安装脚本的规则在 [pnpm-workspace.yaml](../../../pnpm-workspace.yaml) 的 `allowBuilds` 中：esbuild 需要安装二进制；不使用的签名工具脚本显式禁用。只有依赖或构建方式改变时才调整这份配置。
