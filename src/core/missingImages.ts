@@ -1,5 +1,5 @@
 import type {TestCase} from "./document";
-import type {ImageLocation} from "./testset";
+import type {ImageLocation} from "./screenshots";
 
 /**
  * 一条用例缺截图的警告。探测阶段（扫测试文件时）就能算出来，不用等跑测试。

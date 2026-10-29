@@ -1,5 +1,5 @@
-import {orderImageLocations} from "./testset";
-import type {ImageLocation} from "./testset";
+import {orderImageLocations} from "./screenshots";
+import type {ImageLocation} from "./screenshots";
 
 export interface ImageHoverInput {
     /** image 字段里的文件名，例如 `帝江号_大世界.png` */

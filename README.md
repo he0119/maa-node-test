@@ -9,274 +9,217 @@
 
 </div>
 
-Maa 节点测试的 VS Code 插件，基于 `maa-tools` 的节点测试机制（`tests/**/test_*.json` 与测试集截图），适用于任何采用该机制的仓库。默认值取自 MaaEnd（作者日常使用的仓库），均可在设置中调整。
+Maa 节点测试的 VS Code 插件。它调用被测仓库里的 `maa-tools` 收集和运行测试，在编辑器里查看截图、编写用例、定位失败原因。默认配置取自 MaaEnd，可以在设置里调整。
 
 ## 功能
 
-- **运行单条用例**：修改识别节点后无需执行全量 `pnpm test` 即可验证目标用例。
-- **报告失败原因**：失败的平台、未命中的节点、识别框偏差，均写入测试面板。
-- **对照各平台截图**：悬浮提示展示 Win32 / ADB / CloudADB 下的同名截图，顺序跟本文件 `configs.controller` 一致，缺失的平台单独标注。
-- **写用例时就提示缺图**：声明的平台没有这张截图时，`image` 的值下面直接出现黄色波浪线，测试面板里的用例节点也会写「缺 ADB 截图」。
-- **字段补全**：`controller` / `resource` 补的是 `tests/scripts/loader.mts` 里登记过的名字，`image` 补测试集里真实存在的截图（按本文件声明的平台收窄），`hits` 补 pipeline 里的节点名（只算本文件声明的控制器会加载的资源目录）；各级对象的键也能补。
-- **节点注释与跳转**：`hits` 里的节点名，展开补全能看到它在 pipeline 里的 `desc` 和定义位置；鼠标放上去显示注释、识别/动作和节点源码片段；Ctrl+Click 或 F12 跳到定义。`image` 字段上 Ctrl+Click 打开截图。
-结果有多个时（同一张图在几个平台都有、同一个节点名在多处定义）会弹一个列表让你挑，顺序跟本文件声明的平台一致 —— 常常只是想看某个平台那张图，列表里直接选就行。
-- **内联提示**：`hits` 里每个节点名后面直接贴一句灰色注释（就是 pipeline 里的 `desc`），一屏能同时看到好几个节点各自是干什么的；点提示跳到定义。不喜欢可以在设置里关掉。
-- **测试面板集成**：以「目录 → 测试文件 → 用例」三层组织，目录、文件、单条用例均可运行。
+- **运行文件或单条用例**：从文件上方的按钮、命令面板或测试面板发起运行。只选一条用例时，仍检查它所在测试组的完整节点，不会因为少跑其他用例而漏掉不该命中的节点。
+- **报告失败原因**：显示失败的控制器与资源组合、未命中的节点、识别框偏差、缺失的识别结果和截图。
+- **对照截图**：鼠标放在 `image` 字段上，查看测试集各平台的同名截图；默认宽 400 像素，保留「打开原图」链接。
+- **编写辅助**：补全字段、控制器、资源、截图名和节点名；在 `hits` 节点名旁显示注释，支持悬浮查看定义、Ctrl+Click 或 F12 跳转。
+- **缺图提示**：按配置的测试集目录检查截图，在 `image` 值下画黄线，也在用例节点上提示。它是编辑辅助，实际运行以 maa-tools 的结果为准。
+- **测试面板**：按目录、文件、用例组织；可以运行、取消或排除选中的用例。用例在本次计划的全部平台完成后立即显示结果，文件也在所选用例完成后结束，不必等整批跑完。
+- **工具版本常显**：主状态栏左侧显示 maa-tools 版本，与 MaaSupport/MaaFramework 版本项一样使用默认优先级。悬浮查看完整来源，点击整项重新查询。
 
 ## 范围
 
-插件范围限于节点测试，输入为测试文件（`tests/**/test_*.json`）、测试集截图与 `maatools.config.mts`。Pipeline 链路校验、资源打包、任务运行调试不在其中，由各仓库自己的工具负责。
+插件只服务于节点测试。测试定义、选择哪些用例、识别检查和最终结论由 `maa-tools` 负责；插件负责发起操作和显示结果。Pipeline 链路校验、资源打包和任务运行调试由各仓库自己的工具负责。
 
-## 装之前
+运行与测试发现使用仓库的 `maatools.config.mts` 及其中的 `test.cases`，不以截图扫描决定测试范围。扩展用 `test --list --json` 读取收集清单；在终端用 `test --list` 可查看人类可读列表，两者都不运行识别。只支持文件测试，每条展开用例都必须关联实际测试 JSON 文件的绝对路径与原始下标；自定义测试加载脚本（loader）的要求见 [reference.md](.agents/skills/maa-node-test-dev/reference.md#测试定义与来源)。
+
+普通测试 JSON 写 `name`、`image`、`hits` 等字段，`loadTestCases()` 和 `loadAllTestCases()` 会自动补齐 `origin`。自定义 loader 展开时必须保留来源，动态生成的展开对象也须关联实际文件和原始下标。缺少或无效的来源会在加载计划阶段报 `test-source-invalid`，不会进入识别。运行报告通过 `files` 提供文件、用例和平台结果。
+
+## 安装前
 
 | 需要 | 说明 |
 | --- | --- |
-| Node 22 或更高 | `maa-tools` 和仓库脚本都依赖 Node 22 的 API；不在 PATH 里可以设 `maaNodeTest.nodePath` |
-| pnpm，以及一个装好依赖的仓库（用 `maa-tools` 做节点测试的，比如 MaaEnd） | 工作区根要有 `maatools.config.mts`，并且跑过 `pnpm install` |
-| VS Code 1.85 或更高 | |
+| Node 22 或更高 | 不在 PATH 中时设置 `maaNodeTest.nodePath` |
+| 已安装依赖的被测仓库 | 配置中已定义节点测试；仓库里的 maa-tools 为稳定版 `>=1.2.0 <2.0.0`，并提供本插件需要的收集和运行接口 |
+| VS Code 1.85 或更高 | 运行插件的窗口须打开被测仓库 |
 
-插件不改动被测仓库，也不往里加文件。
+插件使用被测仓库安装的 `@nekosu/maa-tools`，不另外安装一份。收集与运行读取这份包的 `package.json` 检查版本，不为每次操作额外执行 `--version`。允许版本号带 `v` 前缀或构建元数据，不接受预发布版、版本未知或格式无效的版本。版本在支持范围内时，命令仍须成功启动，返回内容仍须通过必需结构、记录 `type`、来源覆盖和进度与最终结果一致性检查。
 
-## 装
+1.x 内的 JSON 兼容规则见 [reference](.agents/skills/maa-node-test-dev/reference.md#包版本与-json-兼容)。
+
+运行测试会由 maa-tools 写入识别日志，默认在被测仓库的 `debug` 目录下。插件不会替你安装依赖或改写测试文件。
+
+## 安装
 
 ### 正式版
 
-还没发布到市场。发布之后可以：
+从 [GitHub Releases](https://github.com/he0119/maa-node-test/releases) 下载 `.vsix`，在 VS Code 中使用「从 VSIX 安装」或执行：
 
-- 在 VS Code 的扩展面板里搜「Maa Node Test」安装；
-- 或者从 GitHub Release 下载 `.vsix`，用 `code --install-extension maa-node-test-<版本>.vsix` 安装。
+```bash
+code --install-extension maa-node-test-<版本>.vsix
+```
 
-维护者发一版分两步（`main` 有分支保护，版本号改动也得走 PR）：
-
-1. `pnpm version patch --no-git-tag-version` 改版本号，提 PR 合进 `main`；
-2. 到仓库的 Actions 页面手动触发 `Release` 工作流（选 `main` 分支）。它读 `package.json` 的版本号，打 `v<版本>` 标签、跑测试、打包、建 GitHub Release 并挂上 `.vsix`，然后发布到市场（细节见 [reference.md](.agents/skills/maa-node-test-dev/reference.md#构建与发布)）。
-
-标签由工作流自己打，不需要在本地 `git tag`；手动推标签不会再触发发布。
+维护者发版时，先通过 PR 更新 `package.json` 的版本号，再从 Actions 手动触发 `Release` 工作流。工作流创建版本标签、打包并发布，详见 [构建与发布](.agents/skills/maa-node-test-dev/reference.md#构建与发布)。
 
 ### 开发态
 
-想改代码或者还没发版时，用调试方式跑：
+在插件目录安装依赖并构建：
 
 ```bash
-cd ~/dev/maa-node-test
 pnpm install
-pnpm run compile
+pnpm run build
 ```
 
-关键点：**运行插件的那个窗口，工作区必须是被测的那个仓库**。插件要靠它读 `maatools.config.mts`、`tests/` 和截图；工作区不对，测试面板就是空的。下面三种方式都行，示例里用的是作者本机的 `~/dev/MaaEnd`，换成你自己的仓库路径即可。
+**运行插件的调试窗口必须打开被测仓库，而不是只有插件源码。** 仓库内要有设置项 `maaNodeTest.configPath` 指向的配置文件。下面以 `~/dev/MaaEnd` 为例，换项目时请修改工作区或调试配置中的路径。
 
-### 方式一（推荐）：用多根工作区文件
-
-把 `maa-node-test.code-workspace` 拖进 VS Code（或 `code ~/dev/maa-node-test/maa-node-test.code-workspace`）。它同时打开两个文件夹：`MaaEnd`（排第一个，主工作区）和 `maa-node-test`（插件源码）。
-
-按 `F5` 会自动编译，再起一个**工作区是 MaaEnd** 的调试窗口，插件已经装好。在那个窗口里打开任意 `tests/**/test_*.json` 就能用；在源码窗口打断点也会正常命中。
-
-### 方式二：只开插件目录
-
-打开 `~/dev/maa-node-test` 直接按 `F5`。`.vscode/launch.json` 已经写好「插件从本目录加载、调试窗口打开 `~/dev/MaaEnd`」，所以调试窗口的工作区还是 MaaEnd。
-
-### 方式三：直接在 MaaEnd 窗口里调试
-
-把这段加到 `MaaEnd/.vscode/launch.json` 的 `configurations` 里，按 `F5`：
+1. **多根工作区**：打开 `maa-node-test.code-workspace`。当前配置包含相邻的 `MaaEnd` 和插件源码目录。按 `F5` 自动构建，再打开以 MaaEnd 为工作区的调试窗口。
+2. **只开插件目录**：按 `F5`。当前 `.vscode/launch.json` 会让调试窗口打开 `../MaaEnd`；使用其他仓库前，先改成其实际路径。
+3. **在被测仓库窗口调试**：把下面配置加入本机的调试配置，自行构建后按 `F5`。不要把个人路径提交到被测仓库。
 
 ```json
 {
     "name": "调试 Maa 节点测试插件",
     "type": "extensionHost",
     "request": "launch",
-    "args": ["--extensionDevelopmentPath=${userHome}/dev/maa-node-test", "${workspaceFolder}"],
-    "outFiles": ["${userHome}/dev/maa-node-test/out/**/*.js"]
+    "args": [
+        "--extensionDevelopmentPath=${userHome}/dev/maa-node-test",
+        "${workspaceFolder}"
+    ],
+    "outFiles": [
+        "${userHome}/dev/maa-node-test/out/**/*.js",
+        "${userHome}/dev/maa-node-test/dist/**/*.js"
+    ]
 }
 ```
 
-注意这是个人配置：`MaaEnd/.vscode/launch.json` 是仓库共享文件，路径里带着你自己的插件位置，别提交上去。
+改源码后重新构建并重载调试窗口，或运行对应的 watch 命令持续构建。
 
-方式一、方式二按 `F5` 会自动先编译；方式三要自己 `pnpm run compile`（或者 `pnpm run watch` 挂着）再重载窗口。
+## 使用
 
-## 怎么用
+### 工具版本状态
+
+主状态栏左侧显示无图标的 `maa-tools <版本>`，与 MaaSupport/MaaFramework 版本项一样使用默认优先级。被测仓库有配置或 maa-tools 包时常显，编辑普通文件也能看到；无工作区，或普通项目两者都没有时隐藏。
+
+点击整项重新查询，悬浮查看版本来源、支持范围、被测仓库、命令入口、软链接实际文件、Node、配置和错误原因。状态栏优先使用 `maa-tools --version`，与兼容提示共用查询结果。查询中、未安装、版本不受支持或查询失败均有对应文字；查询失败时，安装包声明的版本只供排错，不能证明命令能正常执行。
+
+切换工作区、修改 Node 或配置路径、相关依赖与锁文件变化后会自动刷新。任务运行数量显示在独立的状态栏项中。
 
 ### 测试面板
 
-左侧活动栏的烧瓶图标（测试）：
+点击左侧烧瓶图标，找到 **Maa Node Test**：
 
-- 左侧测试面板里的控制器叫 **Maa Node Test**，跟扩展在商店里的名字一致；
-- 树是三层：**目录 → 测试文件 → 用例**。目录按 `tests` 下的实际文件夹生成（`tests` 这层省略），目录名后面不带「含 N 个测试文件」这类灰字；
-- 文件节点标题是文件名，灰字写测试组名和平台/资源矩阵（不写用例数，展开就能看见）；
-- 用例节点标题优先用 `name`，没有就用图片名（去掉扩展名）。灰字写图片文件和命中情况：有 `name` 时带图片名，没有就只写 `命中 N 个节点` 或 `负例（不该命中）`，不重复标题；
-- 点目录的播放键 → 下面所有文件**一次进程**跑完；点文件 → 这个文件所有用例；点单条用例 → 只跑这一条；
-- 跑的时候能在「测试输出」里看完整日志，也能点取消；
-- 保存测试文件后自动刷新（停手 300 毫秒后重扫）。
+- 目录下是测试文件，文件下是用例。文件名旁显示组名；用例优先显示 `name`，没有则用截图名。用例灰字只提示负例或缺图，读取错误保留短提示，不重复图片名、节点数及平台资源组合；树节点不另设悬浮提示，详细信息可查看源文件和测试输出。
+- 点目录播放键运行其中的文件；点文件运行整文件；点用例只运行该条。
+- 没有排除项的多个文件会合为一批运行。排除文件中的个别用例时，插件只提交其余用例，可能需要多次调用。
+- 所选项先排队，真正提交识别时才显示运行中。一条用例要等它在本次计划中的所有控制器、资源组合完成后才显示通过、失败、错误或跳过，不会只因第一个平台通过就变绿。
+- 用例完成后立即更新原因和耗时；文件在所选用例全部有结果后结束。其他文件继续运行时，已完成项保持自己的结果。
+- 坏文件保留在树中并显示读取错误；运行时单独报错，不阻止其他正常文件。
+- 保存测试文件后自动刷新，也可用刷新按钮或命令手动刷新。
+- 取消时保留已经完成并确认的用例和文件结果，尚未完成的标为跳过。末尾摘要只显示取消与耗时，不把已完成的一部分说成整批通过。
 
-失败信息分两层：节点上显示一行短标题，点开测试结果看到明细列表。例如只在 CloudADB 上失败时：
+失败节点显示一行短标题，展开结果可看具体节点、截图及失败原因。例如：
 
 ```text
-**CloudADB-官服 失败**
+CloudADB-官服 失败
 
-- 节点 `EnvironmentMonitoringPhotoSettingsOpened` 这张图上没识别到该节点（算法 ColorMatch）
-- 截图 `武陵_拍照模式_画面设置.png`（CloudADB-官服）
+- 节点 EnvironmentMonitoringPhotoSettingsOpened：这张图上没识别到该节点
+- 截图 武陵_拍照模式_画面设置.png
 - 通过：Win32-官服、ADB-官服
 ```
 
-文件节点上是「2 条用例失败」，展开后逐条列出每条用例的原因，省得一条条重跑。
+### 测试输出
 
-### 测试输出：先看末尾那块「结果」
+输出开头保留 maa-tools 的日志，末尾是本次结果：结论、文件与用例计数、耗时，以及失败、未能验证和缺图跳过的用例。通过的用例只计数，不逐条列出。
 
-「测试输出」分两段，顺序就是读的顺序：
+- **过滤后没有用例**：文件没有读取错误、已确认本次没有所选用例时，标为跳过，不标绿；其他文件的真实通过或失败不受影响。全部文件都没有匹配用例时，整批仍为空运行。摘要单列筛选跳过的文件数。
+- **缺图不算通过**：该平台记为跳过。同一用例在其他平台已有效验证时，文件仍可通过，但会列明哪些平台跳过；用例标灰不表示所有平台都没运行。
+- **全缺图或未得到有效验证**：本次有待验证用例时，文件报错，不显示通过；单条缺图用例在面板标灰，结果摘要会说明该文件没有完成验证。
+- **结果不完整或矛盾**：所选用例没有对应结果、格式不支持、即时结果与最终结果矛盾时，显示错误，不补成通过；同一次调用中已经显示的可疑结果也会改为错误。若是格式完整的执行错误，仍保留已经确认的用例结果，另列运行错误，整批不算通过。
+- **耗时不同**：用例节点显示各平台分配给该用例的识别执行时间；文件是所选用例时间之和。末尾「耗时」是本次运行实际经过的时间，并行执行时两者不相等。同一截图复用的识别时间会在对应的用例间分摊，避免重复计数。
 
-1. **原始日志**（开头有一条分隔线）：runner 的原始输出 —— MaaFW 准备、资源加载、每组每张图的判定。排错时看这段，平时可以跳过；
-2. **结果块**（跑完贴在末尾）：先看这里。
+日志开头显示本次命令，可复制到被测仓库终端排查。扩展用 `test --jsonl` 读取标准输出：进度每行一个 JSON，最后一条 `run-result` 包含完整结果；人类日志走 stderr。只需要一份最终报告时，可单独使用 `test --json`。
 
-```text
-━━━━ 结果 ━━━━
-结论：没通过 —— 1 个文件失败
-文件 3 个：通过 2 · 失败 1
-用例 18 条：通过 16 · 失败 1 · 缺图跳过 1
-耗时 41 秒
+来源文件路径在 Windows 上匹配和去重时忽略大小写，显示仍保留原有大小写；其他系统区分大小写。
 
-失败（1 条）：
-  tests/DeliveryJobs/test_quick_transfer.json · 第 2 条 ADB-官服 失败
-缺图跳过（1 条，不算失败）：
-  tests/X/test_y.json · 第 4 条 CloudADB-官服 没验证到
-━━━━ 结果 ━━━━
-```
+### 文件中的按钮和命令
 
-- 通过的文件只计入数字，不逐条刷屏；失败、没跑起来、缺图跳过的各占一行（「文件 · 第几条 · 短标题」）；
-- 一条用例都没真正跑过时（例如只跑一条缺图用例），结论写「没有验证到」，不会说「通过」；
-- 取消时只报「已取消」和耗时，不给半截的通过/失败判断；
-- 单跑一条用例时结果块形状一样，只是计数都是 1。
-
-### 文件里的运行按钮（CodeLens）
-
-打开任意 `tests/**/test_*.json`：
-
-- 文件第一行上方：`运行整个文件（N 个用例）：<测试组名>`；
-- 每条用例的 `{` 上方：`运行此用例：<用例名>`。
-
-跑完会进「Maa 节点测试」输出面板，并按结果弹提示（通过 / 失败 / 没跑起来 / 没有匹配用例）。
-
-### 鼠标放在 `image` 上：看各平台截图
-
-指针放在用例的 `image` 键或它的字符串值上都行：
-
-```text
-**帝江号_大世界.png** · 在 `tests/MaaEndTestset` 下找到 3 张（共 3 个平台/资源组合） · 本文件声明平台：Win32、ADB
-
-**ADB / Official_CN** · 1280×720 · [打开原图](file:///…)
-（这里是一张预览图，默认宽 400）
-
-**CloudADB / Official_CN** · 缺失
-```
-
-- 平台/资源组合是从 `maaNodeTest.testsetDir` 目录**实际扫出来的**，不写死平台名，加了新控制器目录也能自动出现；
-- 某个平台没有这张图就直接写 `缺失` —— 这比跑完测试再猜「为什么这条没验证到」快得多；
-- 图片按原始像素渲染，1280×720 在悬浮里比较大，看不清就点「打开原图」；
-- 一张都没有时会直接说「没有任何平台包含 xxx.png」。
-
-### 命令面板
+打开 `tests/**/test_*.json`，文件顶部可运行整文件，每条用例上方可运行该条。
 
 | 命令 | 作用 |
 | --- | --- |
-| `Maa 节点测试: 运行当前测试文件` | 跑当前文件所有用例 |
-| `Maa 节点测试: 运行当前测试用例` | 先弹用例列表让你选 |
-| `Maa 节点测试: 查看当前测试文件的运行计划（不实际执行）` | dry-run：只解析、过滤、检查截图，不加载 MaaFW |
-| `Maa 节点测试: 刷新测试面板` | 手动重扫测试文件 |
+| `Maa 节点测试: 运行当前测试文件` | 运行当前文件 |
+| `Maa 节点测试: 运行当前测试用例` | 选择并运行一条用例 |
+| `Maa 节点测试: 刷新测试面板` | 重新调用 maa-tools 收集测试 |
 
-## 设置项
+面板和实际运行使用磁盘内容。修改后先保存，避免按钮按编辑内容选择了用例，而运行读到旧文件。
+
+### 截图、补全和跳转
+
+鼠标放在 `image` 的键或值上可查看截图。平台与资源目录从 `maaNodeTest.testsetDir` 下扫描，预览按本文件声明的平台排序；多个截图或节点定义会列出来供选择。
+
+预览默认宽 400 像素，高度按比例缩放；设置 `maaNodeTest.hoverImageWidth` 为 `0` 时按原图尺寸显示。远程环境中图片加载失败，可点「打开原图」。
+
+编辑辅助支持 MaaEnd 使用的 `<控制器目录>/<资源目录>/<图片>` 布局，并读取 `tests/scripts/loader.mts` 中的 `controllerMap`、`resourceMap` 字符串映射。没有映射时按同名目录处理。节点补全还会读取 `assets/interface.json` 和 pipeline 定义。
+
+**这些辅助并不执行仓库的 loader。** 自定义图片路径、资源映射或加载方式可能导致预览、补全或黄线与运行不一致；黄线也不核对资源服是否完整匹配。请以 maa-tools 实际返回的图片路径和运行结果为准，不要仅靠黄线判断用例是否有效。
+
+## 设置
 
 | 设置 | 默认值 | 说明 |
 | --- | --- | --- |
-| `maaNodeTest.nodePath` | `node` | 跑测试用的 node。要求 22+；不在 PATH 里就填绝对路径 |
-| `maaNodeTest.configPath` | `maatools.config.mts` | maa-tools 配置文件，相对工作区根。用来认定哪个工作区文件夹是「仓库根」 |
-| `maaNodeTest.testsetDir` | `tests/MaaEndTestset` | 截图根目录，相对工作区根。悬浮预览按它扫描平台目录 |
-| `maaNodeTest.hoverImageWidth` | `400` | 悬浮里预览图的显示宽度（像素）。`0` 表示按原图尺寸 |
-| `maaNodeTest.hitsInlayHints` | `true` | 是否在 `hits` 的节点名后面显示注释（内联提示） |
+| `maaNodeTest.nodePath` | `node` | 运行 maa-tools 的 Node，要求 22+；可填绝对路径 |
+| `maaNodeTest.configPath` | `maatools.config.mts` | 相对工作区文件夹的配置路径；用于选择被测仓库，也传给收集和运行命令 |
+| `maaNodeTest.testsetDir` | `tests/MaaEndTestset` | 编辑辅助查截图的根目录，相对被测仓库；不会覆盖 maa-tools 的运行配置 |
+| `maaNodeTest.hoverImageWidth` | `400` | 预览宽度，`0` 表示原图尺寸 |
+| `maaNodeTest.hitsInlayHints` | `true` | 在 `hits` 节点名旁显示注释 |
 
 ## 常见问题
 
-**测试面板是空的。**
-当前窗口的工作区不是被测仓库，或者仓库里没有 `tests/**/test_*.json`。按上面的方式一重新打开。
+**测试面板为空，或提示收集失败。**
 
-**调试窗口（F5）起来十来秒就整个关掉，控制台没有任何报错。**
+确认调试窗口打开的是被测仓库，配置路径正确，并且已安装提供所需接口的 maa-tools。收集会加载该配置和 `test.cases`；检查配置加载、测试读取或 `test-source-invalid` 来源错误。使用文件加载函数自动产生来源，自定义 loader 须保留它。
 
-在远端（Remote-SSH）调试时遇到过：扩展开发宿主窗口在启动 9～15 秒后整个消失，服务端日志里只有一句 `Extension Host Process exited with code: null, signal: SIGABRT`，客户端和服务端都不留下任何 JavaScript 报错。一天里统计到 47 次调试窗口启动、8 次这样死掉（约六分之一）。
+**提示 maa-tools 版本不受支持、不可用或结果格式不符合要求。**
 
-**跟本插件无关**，锅在 node 自带的事件循环库 libuv 里。崩溃栈是：
+在左侧状态栏查看 maa-tools 版本，悬浮核对来源，点击整项刷新。使用稳定版 `>=1.2.0 <2.0.0`；版本过低时更新依赖声明和锁文件，再执行 `pnpm install`，仅执行安装不一定会升级锁定版本。预发布版请换成受支持的稳定版；2.0.0 及更高版本须等插件明确支持后再使用。若无法查询，检查 Node 路径；若包版本在范围内但命令启动或数据检查失败，按测试输出的具体错误处理。
 
-```text
-libc`abort
-libc`__assert_fail
-node`uv__io_poll(...) at linux.c:1427
-node`uv_run(...)
+**提示没有匹配到用例。**
+
+检查传入的文件、用例下标、控制器或资源过滤条件，以及仓库 loader 是否保留每条用例的来源。没有匹配与 MaaFramework 下载失败是两类问题，具体原因见输出。
+
+**测试没跑起来。**
+
+检查 Node 路径、配置加载、首次下载 MaaFramework 所需的网络，以及资源加载日志。输出中的错误代码和说明用于区分这些原因。
+
+**缺图该检查哪里？**
+
+缺图结果会列出 maa-tools 实际尝试的绝对路径。检查文件是否存在，以及配置中的 `casesCwd`、`imageRoot` 和用例的 `image`。尚未执行的错误可能没有图片路径，先按错误代码处理配置或准备问题。`maaNodeTest.testsetDir` 只影响编辑辅助，改它不会改变实际运行读取的截图。
+
+**保存后仍看到旧测试。**
+
+先确认保存成功，再刷新测试面板。配置或 loader 改动后也应手动刷新；面板中的源码范围对应收集时读到的文件。
+
+**远程调试窗口突然关闭，没有 JavaScript 报错。**
+
+曾在 Remote-SSH 环境看到扩展宿主因 `SIGABRT` 退出。可试用调试配置「只加载本扩展（调试窗口会闪退时用）」缩小排查范围，关闭后重新打开。历史调查记录了 libuv 断言失败的调用栈，但不代表所有闪退都由同一原因造成；排查步骤见 [调试宿主调查记录](.agents/notes/implemented/process/2026-10-27-dev-host-sigabrt.md)。
+
+## 开发与发布
+
+插件独立构建和发布，不需要放进被测仓库。常用命令：
+
+```bash
+pnpm run check       # 类型检查
+pnpm run build       # 编译并打包扩展
+pnpm test            # 已编译代码的单元测试
+pnpm run test:all    # 构建和测试
+pnpm run package     # 生成 VSIX
 ```
 
-libuv 给某个文件描述符注册监听时，内核回的不是「已经注册过」（`EEXIST`）而是 `EBADF`（这个描述符已经失效），libuv 没做降级处理，`assert` 一失败就把整个进程 abort 掉。用 eBPF 抓到的现场是 `EPOLL_CTL_ADD fd=76 errno=9`，而 fd 快照显示 76 号在被关闭前是个 socket —— 也就是**有代码把一个还在被监听的 socket 提前关了**。libuv 上游 [issue #5129](https://github.com/libuv/libuv/issues/5129) / [#5130](https://github.com/libuv/libuv/issues/5130) 说的就是这个问题，但修复没有进 1.x 分支。
-
-已经排除的：本插件（崩溃那个窗口里它的输出通道是 0 字节，代码纯 JS，没有任何能发出 SIGABRT 的调用）、`nekosu.maa-support`、`vadimcn.vscode-lldb`、`ms-vsliveshare.vsliveshare`，以及「挂着调试器」（`Ctrl+F5` 不挂调试器也会崩）。
-
-临时办法：`.vscode/launch.json` 里选「只加载本扩展（调试窗口会闪退时用）」，它带 `--disable-extensions`，调试窗口里只加载本插件 —— 少了其它扩展的 socket 增删，能降低概率但不是根治。崩了就重开，插件本身的功能不受影响。
-
-自己往下查的话：服务端日志在 `~/.vscode-server/data/logs/<时间戳>/remoteagent.log`（搜 `SIGABRT`），宿主细节在同目录 `exthost<N>/remoteexthost.log`；想拿原生调用栈就开 core（`kernel.core_pattern` + `prlimit --core=unlimited`），然后用 `vadimcn.vscode-lldb` 自带的 lldb 读；想抓 errno 用 `bpftrace` 而不是 `strace`（`strace` 会把进程拖慢，反而让这种时序问题消失）。完整步骤记在 [.agents/notes/implemented/process/2026-10-27-dev-host-sigabrt.md](.agents/notes/implemented/process/2026-10-27-dev-host-sigabrt.md)。
-
-**点运行，提示「没跑起来」。**
-大多是 node 版本低于 22，用 `maaNodeTest.nodePath` 指到 22+ 的 node。也可能是第一次运行要联网下载 MaaFW 失败，看「Maa 节点测试」输出面板里的 prepare 日志。
-
-**提示「没有匹配到任何用例」。**
-`configs.controller` 或 `configs.resource` 写得不在 `tests/scripts/loader.mts` 的映射里。命令面板的「查看运行计划」能看出到底解析出了哪些组。
-
-**声明的平台缺截图会怎么提示？**
-
-四个地方都会提示，缺图不会被当成「通过」糊过去：
-
-- **写的时候**（不用跑）：`image` 的值下面一条黄色波浪线，说明哪个平台没这张图、哪个平台连目录都没有；测试面板的用例节点上带一句「缺 ADB 截图」；
-- 悬浮里那个平台直接标 `缺失`；声明了、但测试集里连平台目录都没有，会写「`tests/MaaEndTestset` 下没有这个平台的目录」；
-- 运行日志里先打一块「平台覆盖」：每个平台多少张截图、缺几张，以及声明了却没匹配到测试组的平台（通常说明 controller 名字写错或 `tests/scripts/loader.mts` 没映射它）；
-- 测试面板里那条用例标成**跳过**（灰的，不算失败），文件节点仍算通过，但会带一句「N 条用例没有验证到（缺图跳过，不算失败，补图后重跑即可）」并在测试输出里列出是哪几条 —— 因为 `maa-tools` 遇到缺图只会跳过，跳过在它那里等于通过，插件把它显式顶出来，同时不把整次运行染红。
-
-**为什么全量跑要几分钟？**
-节点测试本身就是几百上千次识别，时间花在识别上，不是插件。插件已经把「一个文件一个进程」改成「一批文件一个进程」，和 `pnpm test` 的速度基本一致；机器核越多越快（maa-tools 默认开 `核数/4` 个 worker）。
-
-**悬浮里的图片不显示。**
-远程 / WSL / 虚拟工作区下 `file://` 可能加载不出来，点「打开原图」看。
-
-**改了测试文件没生效。**
-面板和运行都读磁盘上的文件，先保存（`Ctrl+S`）。
-
-## 已知限制
-
-1. **两条用例共用同一张截图、同一批节点时，会被同时点名**：结论按「图片 + 期望命中的节点」归位，这种情况区分不了。
-2. **缺图的用例在 `maa-tools` 里算通过**：它遇到不存在的截图只打印跳过。插件不改它的判定，但会在悬浮、运行日志（平台覆盖）和测试面板（用「跳过」而不是绿勾，也不算失败）三处显式提示。
-3. **逐用例原因依赖 maa-tools 的错误明细**：它写 `tests/maatools/error_details.json`，插件只在本次运行确实更新过这个文件时才采信；拿不到就退化成「整个文件失败，原因未知」。
-4. **悬浮图片按原尺寸渲染**：图大时悬浮框会很高。
-
-## 和具体仓库的关系
-
-插件是独立的（自己一个仓库、自己一套构建），**不塞进被测仓库**：那边 CI 只为 Pipeline / 资源 / Agent 服务，加一个需要 `tsc` 构建的 VS Code 扩展会平白多一套构建产物和依赖。
-
-它对被测仓库的假设只有三条：
-
-1. 工作区根有 `maatools.config.mts`（`maa-tools` 的默认约定）；
-2. 测试文件叫 `tests/**/test_*.json`（同上）；
-3. 截图按 `<控制器>/<资源服>/<图片>` 分目录放在测试集里。默认路径是 `tests/MaaEndTestset`（MaaEnd 的写法），别的仓库用 `maaNodeTest.testsetDir` 指过去。
-
-补全和缺图检查都读 `tests/scripts/loader.mts` 里的 `controllerMap` / `resourceMap`：那是「测试文件里写的名字 → 截图目录名」的唯一依据。没有这个文件时，插件按同名处理，补全只给测试集里扫到的平台目录名。
-
-图标 `icon.png` 用的是 MaaEnd 项目的 logo（512×512）。fork 之后要换成自己的图标，直接替换这个文件即可。
-
-默认值来自 MaaEnd 纯粹是因为作者日常在测它。换一个仓库来用，一般只需要改 `maaNodeTest.testsetDir` 和 `maaNodeTest.configPath`；如果那个仓库的 `tests/scripts/loader.mts` 用了不一样的组名拼法，插件靠「组名 + 用例键」把用例从全量结果里挑出来这一步也要跟着调（见 [reference.md](.agents/skills/maa-node-test-dev/reference.md#过滤规则)）。
-
-## 想改这个插件
-
-- 常用命令：`pnpm run check`（类型检查）、`pnpm run build`（编译 + 打包到 `dist/`）、`pnpm test`（扩展单测）、`pnpm run test:runner`（runner 单测）、`pnpm run test:all`、`pnpm run package`（打 VSIX）；
-- [AGENTS.md](AGENTS.md)：项目边界、代码地图、硬约束；
-- [.agents/skills/maa-node-test-dev/SKILL.md](.agents/skills/maa-node-test-dev/SKILL.md)：改这个插件时的操作手册；同目录 [reference.md](.agents/skills/maa-node-test-dev/reference.md) 是命令行契约、退出码映射、内部实现细节；
-- [.agents/notes/](.agents/notes/README.md)：设计取舍记录（为什么自带 runner、为什么独立成仓、为什么合成一批跑）。
+- [AGENTS.md](AGENTS.md)：项目范围、代码职责和约束。
+- [开发技能](.agents/skills/maa-node-test-dev/SKILL.md)：修改位置和验证方法。
+- [reference.md](.agents/skills/maa-node-test-dev/reference.md)：逐文件职责、主要调用流程、命令接口、结果格式和测试构建入口。
+- [设计记录](.agents/notes/README.md)：已有设计的取舍。
 
 ## 致谢
 
-- [neko-para/maa-support-extension](https://github.com/neko-para/maa-support-extension)：本插件的参考实现，扩展的组织方式、悬浮与补全里显示节点注释的写法都来自它；它的 `@nekosu/maa-tools` 还直接提供了节点测试的执行能力（`loadConfig` / `runTest` / `loadAllTestCases`），插件自己不实现识别与比对。
-- [MaaXYZ/MaaFramework](https://github.com/MaaXYZ/MaaFramework)：节点（Pipeline）协议与识别算法，节点测试跑的就是它。
-- [MaaEnd/MaaEnd](https://github.com/MaaEnd/MaaEnd)：节点测试的用例格式、`tests/MaaEndTestset` 的测试集目录约定、`tests/scripts/loader.mts` 里的控制器与资源映射；插件的默认值和图标都取自这个仓库。
-- [he0119/vscode-bangumiplan](https://github.com/he0119/vscode-bangumiplan)：发布流程的参考，测试/发布两个 workflow 的结构（vsce 发布、Open VSX、GitHub Release 附件）照它配的。
+- [neko-para/maa-support-extension](https://github.com/neko-para/maa-support-extension)：扩展组织方式与编辑辅助的参考；其中的 `@nekosu/maa-tools` 负责测试定义、收集、过滤、识别与结果汇总。
+- [MaaXYZ/MaaFramework](https://github.com/MaaXYZ/MaaFramework)：节点协议与识别算法。
+- [MaaEnd/MaaEnd](https://github.com/MaaEnd/MaaEnd)：测试集布局、loader 映射、默认配置及图标来源。
+- [he0119/vscode-bangumiplan](https://github.com/he0119/vscode-bangumiplan)：发布流程参考。
 
 ## License
 

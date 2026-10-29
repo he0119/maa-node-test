@@ -1,6 +1,6 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
-import {parseHitEntries, truncateInlayLabel} from "./hits";
+import {isHitsEntryPath, parseHitEntries, truncateInlayLabel} from "./hits";
 
 const TEXT = `{
     "configs": {"controller": ["Win32"], "resource": "官服"},
@@ -50,6 +50,53 @@ test("hits 解析：没有 hits、hits 不是数组、文件坏掉都不抛异�
     assert.deepEqual(parseHitEntries('{"cases": [{"hits": "InWorld"}]}'), []);
     assert.deepEqual(parseHitEntries("not json"), []);
     assert.deepEqual(parseHitEntries(""), []);
+});
+
+test("hits 路径判断：只认 cases[n].hits[m] 和它的 .node", () => {
+    assert.equal(
+        isHitsEntryPath([
+            "cases",
+            0,
+            "hits",
+            1,
+        ]),
+        true,
+    );
+    assert.equal(
+        isHitsEntryPath([
+            "cases",
+            0,
+            "hits",
+            1,
+            "node",
+        ]),
+        true,
+    );
+    assert.equal(
+        isHitsEntryPath([
+            "cases",
+            0,
+            "hits",
+            1,
+            "box",
+        ]),
+        false,
+    );
+    assert.equal(
+        isHitsEntryPath([
+            "cases",
+            0,
+            "image",
+        ]),
+        false,
+    );
+    assert.equal(
+        isHitsEntryPath([
+            "configs",
+            "name",
+        ]),
+        false,
+    );
 });
 
 test("内联提示文案：压成一行并截断", () => {

@@ -2,7 +2,7 @@ import {strict as assert} from "node:assert";
 import {test} from "node:test";
 import type {TestCase} from "./document";
 import {collectMissingImages, describeMissingImage, summarizeMissingImage} from "./missingImages";
-import type {ImageLocation} from "./testset";
+import type {ImageLocation} from "./screenshots";
 
 /** 造一条用例：只关心 image 和下标，其它字段给默认值 */
 function testCase(index: number, image: string): TestCase {

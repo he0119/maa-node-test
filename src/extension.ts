@@ -1,9 +1,10 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 import {readNodeTestConfig, resolveNodeTestWorkspace} from "./config";
-import {isTestFilePath, parseTestDocument} from "./core/document";
-import type {TestDocument} from "./core/document";
-import {RUN_CASE_COMMAND, RUN_FILE_COMMAND, SHOW_PLAN_COMMAND} from "./core/lens";
+import {isTestFilePath} from "./core/document";
+import {collectTests, type ListCase} from "./maatools/collect";
+import {samePath} from "./core/paths";
+import {RUN_CASE_COMMAND, RUN_FILE_COMMAND} from "./core/lens";
 import {NodeTestCodeLensProvider, TEST_FILE_SELECTOR} from "./providers/codeLens";
 import {resolveControllerDir} from "./core/loaderMaps";
 import {RepoIndex} from "./core/repoIndex";
@@ -11,13 +12,15 @@ import {NodeTestCompletionProvider} from "./providers/completion";
 import {NodeTestDefinitionProvider} from "./providers/definition";
 import {NodeTestHoverProvider} from "./providers/hover";
 import {NodeTestInlayHintsProvider} from "./providers/inlayHints";
-import {describeError, killRunningTests, NodeTestRunner} from "./runner";
-import type {RunRequest} from "./runner";
-import {NodeTestExplorer, REFRESH_TESTS_COMMAND} from "./testing";
+import {MaaToolsVersionStatus} from "./toolVersionStatus";
+import {describeError, killRunningTests, NodeTestRunner} from "./testRunner";
+import type {RunRequest} from "./testRunner";
+import {NodeTestExplorer, REFRESH_TESTS_COMMAND} from "./testController";
 
 /** 当前激活的 runner 和测试面板，只有 deactivate 时才会置空 */
 let runner: NodeTestRunner | undefined;
 let explorer: NodeTestExplorer | undefined;
+let versionStatus: MaaToolsVersionStatus | undefined;
 /** 补全用的仓库索引：按工作区缓存，换工作区或改设置就重建 */
 let repoIndex: RepoIndex | undefined;
 let repoIndexKey = "";
@@ -33,12 +36,16 @@ const WARM_STEP_DELAY_MS = 200;
 /** 这里只做装配：创建输出通道、注册 provider 和命令，具体逻辑各在各的模块里 */
 export function activate(context: vscode.ExtensionContext): void {
     const output = vscode.window.createOutputChannel("Maa 节点测试");
-    runner = new NodeTestRunner(output, context.extensionPath);
-    explorer = new NodeTestExplorer(context.extensionPath, resolveController, scheduleWarm);
+    runner = new NodeTestRunner(output);
+    explorer = new NodeTestExplorer(resolveController, scheduleWarm);
+
+    // 版本显示与兼容提示共用查询；依赖或被测工作区改变后自动更新。
+    versionStatus = new MaaToolsVersionStatus(output);
 
     context.subscriptions.push(
         output,
         runner,
+        versionStatus,
         // 测试面板：把 tests 下的用例做成可以单个运行的测试树
         explorer,
         vscode.languages.registerCodeLensProvider(TEST_FILE_SELECTOR, new NodeTestCodeLensProvider()),
@@ -63,7 +70,6 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand(RUN_CASE_COMMAND, (uri?: unknown, caseIndex?: unknown) =>
             runOneCase(uri, caseIndex),
         ),
-        vscode.commands.registerCommand(SHOW_PLAN_COMMAND, (uri?: unknown) => showPlan(uri)),
         vscode.commands.registerCommand(REFRESH_TESTS_COMMAND, () => explorer?.refresh()),
     );
 }
@@ -131,6 +137,8 @@ export function deactivate(): void {
     if (warmTimer) clearTimeout(warmTimer);
     warmTimer = undefined;
     warmPending.clear();
+    versionStatus?.dispose();
+    versionStatus = undefined;
     killRunningTests();
     runner = undefined;
     explorer = undefined;
@@ -157,28 +165,28 @@ async function runOneCase(uriArgument: unknown, caseIndexArgument: unknown): Pro
     const target = await resolveTestTarget(uriArgument);
     if (!target) return;
 
-    const parsed = parseTestDocument(target.document.getText());
-    if (parsed.problems.length > 0) {
-        const problem = parsed.problems[0];
-        const line = target.document.positionAt(problem.offset).line + 1;
+    // CodeLens 已提供原始下标，实际有效性由 maa-tools 检查，不再本地解析或验证测试文件。
+    if (typeof caseIndexArgument === "number") {
+        startRun(target, {caseIndex: caseIndexArgument});
+        return;
+    }
+
+    // 命令面板需要用户选择时，使用与实际运行同源的收集清单。
+    const config = readNodeTestConfig();
+    const {doc, stderr} = await collectTests({
+        workspaceRoot: target.workspaceRoot,
+        nodePath: config.nodePath,
+        configPath: config.configPath,
+        files: [target.relativePath],
+    });
+    const file = doc?.files.find((entry) => samePath(entry.file, target.relativePath));
+    if (!file || file.error || file.cases.length === 0) {
         await vscode.window.showWarningMessage(
-            `测试文件的 JSON 有语法错误（第 ${line} 行：${problem.message}），先修好再运行。`,
+            `没有可选择的用例：${file?.error ?? (stderr || "maa-tools 没有返回该文件的用例")}`,
         );
         return;
     }
-    if (parsed.cases.length === 0) {
-        await vscode.window.showWarningMessage("这个测试文件里没有 cases，没有可运行的用例。");
-        return;
-    }
-
-    // CodeLens 会直接把下标传进来；从命令面板调时没有参数，弹列表让用户挑
-    const requested = typeof caseIndexArgument === "number" ? caseIndexArgument : undefined;
-    if (requested !== undefined && Number.isInteger(requested) && requested >= 0 && requested < parsed.cases.length) {
-        startRun(target, {caseIndex: requested});
-        return;
-    }
-
-    const picked = await vscode.window.showQuickPick(buildCaseQuickPickItems(parsed), {
+    const picked = await vscode.window.showQuickPick(buildCaseQuickPickItems(file.cases), {
         title: `选择要运行的用例：${target.relativePath}`,
         placeHolder: "选中后回车运行",
     });
@@ -186,23 +194,15 @@ async function runOneCase(uriArgument: unknown, caseIndexArgument: unknown): Pro
     startRun(target, {caseIndex: picked.caseIndex});
 }
 
-async function showPlan(uriArgument: unknown): Promise<void> {
-    const target = await resolveTestTarget(uriArgument);
-    if (!target) return;
-    startRun(target, {dryRun: true});
-}
-
-function startRun(target: TestTarget, options: {caseIndex?: number; dryRun?: boolean}): void {
+function startRun(target: TestTarget, options: {caseIndex?: number}): void {
     if (!runner) return;
     const config = readNodeTestConfig();
     const request: RunRequest = {
         workspaceRoot: target.workspaceRoot,
         nodePath: config.nodePath,
         configPath: config.configPath,
-        testFile: target.document.uri.fsPath,
-        testFileRelativePath: target.relativePath,
+        testFiles: [target.relativePath],
         caseIndex: options.caseIndex,
-        dryRun: options.dryRun,
     };
     runner.run(request);
 }
@@ -255,13 +255,13 @@ async function resolveTestTarget(uriArgument: unknown): Promise<TestTarget | nul
     return {document, relativePath, workspaceRoot: workspace.workspaceRoot};
 }
 
-function buildCaseQuickPickItems(parsed: TestDocument): CaseQuickPickItem[] {
-    return parsed.cases.map((entry) => {
-        const image = entry.image?.value ?? "没写 image";
+function buildCaseQuickPickItems(cases: readonly ListCase[]): CaseQuickPickItem[] {
+    return cases.map((entry) => {
+        const image = entry.image;
         return {
             label: `$(play) 第 ${entry.index + 1} 个用例：${entry.name ?? image}`,
             description: entry.name ? image : undefined,
-            detail: `命中节点 ${entry.hitCount} 个`,
+            detail: `命中节点 ${entry.hits.length} 个`,
             caseIndex: entry.index,
         };
     });

@@ -1,4 +1,4 @@
-# Agent Note: 远端调试窗口的扩展宿主被 SIGABRT 杀掉（根因在 libuv，不在本插件）
+# Agent Note: 远端调试宿主 SIGABRT 调查记录
 
 Status: implemented
 
@@ -12,7 +12,7 @@ Extension Host Process exited with code: null, signal: SIGABRT.
 
 一天下来统计到 47 次调试窗口启动、8 次这样死掉（约 17%），存活时间集中在 9～15 秒，也就是扩展宿主启动收尾、`onStartupFinished` 那批扩展在激活的那几秒。主窗口那个长期运行的宿主（不加载本插件）一直没出过事。
 
-## 根因
+## 当时捕获的现场
 
 扩展宿主进程在事件循环里自己调用 `abort()`，栈是：
 
@@ -47,17 +47,23 @@ assert(errno == EEXIST);   /* ← 死在这里 */
 
 所以链条是：**某处代码把一个仍被 libuv 监视队列引用的 fd 关掉了 → libuv 去注册这个已失效的编号 → 内核回 EBADF → libuv assert 失败 → 整个扩展宿主被 abort**。
 
-libuv 上游 issue [#5129](https://github.com/libuv/libuv/issues/5129) / [#5130](https://github.com/libuv/libuv/issues/5130) 描述的正是这个问题（提议像 `EPOLL_CTL_DEL` 那样把并发关闭引发的错误吞掉），但没有合进 1.x 分支，`v1.x` 最新代码里那行 `abort()` 还在。
+调查时参照了 libuv 上游 issue [#5129](https://github.com/libuv/libuv/issues/5129) / [#5130](https://github.com/libuv/libuv/issues/5130)，其中讨论了并发关闭引发的错误处理。当时检查的 1.x 代码仍包含这处断言；本记录不持续跟踪上游修复，重新排查时应核对实际 libuv 版本。
 
-排除了的嫌疑：本插件（崩溃时它的输出通道 0 字节、代码纯 JS、只 spawn 自己的 runner 子进程）、`nekosu.maa-support`、`vadimcn.vscode-lldb`、`ms-vsliveshare.vsliveshare`（都在禁用后照样崩过），以及「挂着调试器」和「io_uring」（`Ctrl+F5` 不挂调试器也崩；关掉 io_uring 后崩在另一条路径上，见下）。
+当时还观察到：本插件输出通道为空；禁用 `nekosu.maa-support`、`vadimcn.vscode-lldb` 或 `ms-vsliveshare.vsliveshare` 后仍出现过崩溃；`Ctrl+F5` 不挂调试器也会崩。这些现象不足以定位关闭 socket 的代码，也不能仅凭“插件是 JavaScript”就排除其触发底层错误的可能。
 
 另外还发现过第二类崩溃：`uv__epoll_ctl_flush` 里 `if (rc != (int) n) abort()`，因为 libuv 1.52.1 默认用 io_uring 批量提交 `epoll_ctl`，而内核 7.0.0-38 上 `io_uring_enter` 会部分完成。用 `kernel.io_uring_disabled=2` 可以让 libuv 退回普通 `epoll_ctl`（`io_uring_setup` 返回 EPERM，libuv 自己会降级），这一类崩溃随之消失；但 EBADF 这一条与 io_uring 无关，治不了。
 
 ## Decision
 
-**不在插件里做任何规避** —— 崩溃点在 node 的 C 代码里，插件的 JavaScript 没有任何能影响它的入口。README 的「常见问题」如实记录现象、根因和排查手法；调试配置保留「只加载本扩展」这个变体作为排查用（减少 fd 变动来源，能降低概率但不是根治）。
+保留「只加载本扩展」调试配置，用于缩小排查范围；关闭后可重新打开。README 只写症状、临时操作和本记录的链接，不把本次现场推广成所有闪退的根因。
 
-真正的修法在两边：关掉那个 fd 的代码（VS Code 内部或某个扩展，无法从 core 里直接定位），或者 libuv 学会容忍 EBADF（上游 issue 提议的做法）。所以下一步是给 microsoft/vscode 提 issue。
+当前没有足够证据在扩展代码中添加针对性修复。进一步调查需定位关闭文件描述符的代码，或核对 libuv 对这类错误的处理；向上游反馈时应附具体版本与最小复现，而不是直接断言某个扩展无关。
+
+## Alternatives considered
+
+**仅凭输出为空或没有原生调用就排除插件。** 这不能排除 JavaScript 操作触发宿主底层错误，故只保留为当时观察，不作排除结论。
+
+**为所有闪退禁用系统功能。** 当时关闭 io_uring 只影响其中一类崩溃，也改变系统全局行为，不作为插件的通用操作要求。
 
 ## 排查手法（下次遇到「窗口无声消失」可以直接照做）
 
@@ -69,6 +75,6 @@ libuv 上游 issue [#5129](https://github.com/libuv/libuv/issues/5129) / [#5130]
 
 ## Consequences
 
-- 调试窗口还是会偶发闪退（约 1/6 的概率），重开即可；不影响插件本身功能和发布产物。
+- 当时环境中的闪退会中断调试，需要重新打开窗口；历史观测比例不能作为其他机器的发生概率，也不能保证不影响正在进行的操作。
 - `kernel.io_uring_disabled=2` 消掉了 io_uring 那类崩溃，是这台机器上的一个缓解措施，不是修复；设回默认值 0 就恢复原状（libuv 会重新使用 io_uring）。
 - 排查期间留下的产物（core 文件、`core_pattern`、后台脚本、`~/.zshenv` 里的试探性变量）都已清理。

@@ -5,10 +5,11 @@ import {findImageFieldAt, parseTestDocument} from "../core/document";
 import type {ImageField} from "../core/document";
 import {findNodeAtOffset, getNodePath, parseTree} from "jsonc-parser";
 import {buildImageHoverMarkdown} from "../core/hover";
-import {describeNodeBehavior, describePipelineNode, isHitsEntryPath} from "../core/pipeline";
+import {describeNodeBehavior, describePipelineNode} from "../core/pipeline";
+import {isHitsEntryPath} from "../core/hits";
 import type {PipelineNode} from "../core/pipeline";
 import type {RepoIndex} from "../core/repoIndex";
-import {locateImage} from "../core/testset";
+import {locateImage} from "../core/screenshots";
 
 /**
  * 光标落在用例的 image 字段（键或值都算）上时，把这个文件在各个平台/资源下的截图列出来，
