@@ -44,7 +44,7 @@ export class NodeTestHoverProvider implements vscode.HoverProvider {
                 controllers: parsed.configs.controller,
                 testsetLabel: workspace.testsetDir,
                 testsetExists: existsSync(workspace.testsetRoot),
-                locations: locateImage(workspace.testsetRoot, field.value),
+                locations: locateImage(workspace.testsetRoot, field.value, parsed.configs.imageRoot),
                 controllerDirs: controllerDirsOf(this.indexOf()),
                 imageWidth: workspace.hoverImageWidth,
             },

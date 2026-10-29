@@ -8,7 +8,7 @@ import type {PipelineNode} from "./pipeline";
 import {EMPTY_LOADER_MAPS, parseLoaderMaps, resolveControllerDir} from "./loaderMaps";
 import {parseControllerResources, resourcesForControllers} from "./controllerResources";
 import type {ControllerResources} from "./controllerResources";
-import {scanTestsetDirs} from "./screenshots";
+import {scanImageDirs} from "./screenshots";
 
 /**
  * pipeline 目录，节点名的来源。
@@ -61,8 +61,8 @@ export class RepoIndex implements RepoData {
     }
 
     /** 截图文件名：能确定平台就只取这些平台的，确定不了就给全部 */
-    images(controllers: readonly string[]): readonly string[] {
-        const byPlatform = this.imagesByPlatform();
+    images(controllers: readonly string[], imageRoot?: string): readonly string[] {
+        const byPlatform = this.imagesByPlatform(imageRoot);
         const platforms = controllers.map((controller) => resolveControllerDir(this.maps(), controller));
         const names = new Set<string>();
         for (const [
@@ -224,8 +224,8 @@ export class RepoIndex implements RepoData {
     }
 
     /** 平台（截图目录名）→ 这个平台下所有截图文件名 */
-    private imagesByPlatform(): Map<string, string[]> {
-        const dirs = scanTestsetDirs(this.testsetRoot);
+    private imagesByPlatform(imageRoot?: string): Map<string, string[]> {
+        const dirs = scanImageDirs(this.testsetRoot, imageRoot);
         const stamp = dirs.map((dir) => `${dir.dirPath}:${mtimeOf(dir.dirPath)}`).join("|");
         if (this.imageCache && this.imageCache.stamp === stamp) return this.imageCache.byPlatform;
 

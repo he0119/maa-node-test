@@ -1,7 +1,11 @@
 import {strict as assert} from "node:assert";
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import * as path from "node:path";
 import {test} from "node:test";
 import {candidatesFor, completionContextAt, insertTextOf} from "./completion";
 import type {CompletionContext, RepoData} from "./completion";
+import {RepoIndex} from "./repoIndex";
 
 const DATA: RepoData = {
     controllers: [
@@ -79,6 +83,32 @@ test("补全：image 按本文件声明的平台收窄", () => {
             "A.png",
             "B.png",
         ],
+    );
+});
+
+test("补全：imageRoot 传入真实图片索引，候选仍为子目录内的文件名", (t) => {
+    const root = mkdtempSync(path.join(tmpdir(), "maa-node-test-image-root-completion-"));
+    t.after(() => rmSync(root, {recursive: true, force: true}));
+    const testsetRoot = path.join(root, "images");
+    const resourceDir = path.join(testsetRoot, "Win32", "Official_CN");
+    mkdirSync(path.join(resourceDir, "RestaurantDaily"), {recursive: true});
+    writeFileSync(path.join(resourceDir, "default.png"), "default image");
+    writeFileSync(path.join(resourceDir, "RestaurantDaily", "menu.png"), "menu image");
+    const loaderPath = path.join(root, "tests", "scripts", "loader.mts");
+    mkdirSync(path.dirname(loaderPath), {recursive: true});
+    writeFileSync(loaderPath, 'const controllerMap = { "Win32-Front": "Win32" };');
+    const index = new RepoIndex(root, testsetRoot);
+    const context = contextAt('{"cases": [{"image": "', '"image": "');
+
+    const nested = candidatesFor(context, index, ["Win32-Front"], "RestaurantDaily");
+    assert.deepEqual(
+        nested.map((item) => item.label),
+        ["menu.png"],
+    );
+    assert.equal(insertTextOf(nested[0], context), "menu.png");
+    assert.deepEqual(
+        candidatesFor(context, index, ["Win32-Front"]).map((item) => item.label),
+        ["default.png"],
     );
 });
 
