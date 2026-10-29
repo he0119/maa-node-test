@@ -25,7 +25,9 @@ description: 修改 Maa 节点测试 VS Code 插件时使用。覆盖编辑辅�
 
 三个运行入口（CodeLens、命令、测试面板）共用 [testRunner.ts](../../../src/testRunner.ts) 的 `startTestRun()` 和 [maatools/run.ts](../../../src/maatools/run.ts) 的 `startMaaToolsRun()`，统一使用 `test --jsonl`：stdout 每行一个 JSON，三类进度之后，最后唯一一条 `run-result` 携带完整报告；stderr 是日志。`onProgress` 只决定是否通知界面，所有运行都读取并校验同一标准输出流。
 
-`case-result` 要等该来源本次实际计划的全部平台完成，`file-result` 要等文件全部所选用例完成；二者都带可完整校验的范围快照。普通 `--json` 仍可单独获取一份最终报告；扩展发现用 `--list --json` 读取一份清单，单独 `--list` 供人阅读，两种收集都不初始化 MaaFramework。
+`case-result` 要等该来源本次实际计划的全部平台完成，`file-result` 要等文件全部所选用例完成；二者都带可完整校验的范围快照，只包含对应范围的 `files`。普通 `--json` 仍可单独获取一份最终报告；扩展发现用 `--list --json` 读取一份清单，单独 `--list` 供人阅读，两种收集都不初始化 MaaFramework。
+
+公开 `TestRunResult` 只有 `status`、`files`、`durationMs`、可选 `errorCode`/`reason`，无 `groups` 和 `schemaVersion`。每次平台结果只在文件用例的 `platforms[].result` 出现；SDK 内部仍按组展开、固定节点、调度和并行判定，文本日志保留组显示。只支持文件测试，展开后的 `TestCases.cases.origin` 与 `TestCaseRunResult.origin` 在类型和运行时都必填，关联实际测试 JSON 文件的绝对路径与原始下标。普通 JSON 不用手写 origin，文件加载函数自动补齐；自定义 loader 必须保留，动态生成的展开对象也须关联实际文件与下标。缺少、无效或无法对应文件与下标的 origin 在加载计划阶段报 `test-source-invalid`，不进入识别。
 
 [maatools/progress.ts](../../../src/maatools/progress.ts) 保存已完成事实，检查事件、重复和最终对账。相同重复消息不重新发布，矛盾消息报协议错误；没有收到的事件可由最终 JSON 补全。取消保留已校验的完成项、未完成项标跳过，协议错误不能因取消而被忽略。
 
@@ -65,7 +67,7 @@ description: 修改 Maa 节点测试 VS Code 插件时使用。覆盖编辑辅�
 按改动范围和任务分工选择检查，不重复其他人已负责的完整构建。只修改文档时检查事实、链接和 Markdown 格式。测试与构建入口简表见 [reference](reference.md#验证)。
 
 1. 修改 TypeScript 后运行类型检查，并构建需要执行的文件；对数据转换与结果校验运行相关单元测试。
-2. 收集接口改动后，在被测仓库运行 `node node_modules/@nekosu/maa-tools/bin/maa-tools test --list --json`，检查已安装包的版本范围、必需结构、绝对文件路径、原始下标、源码范围、坏文件及无来源说明；另用单独 `--list` 检查人类列表与同一收集结果一致。非默认配置传相同路径，两种收集都不准备 MaaFramework。
+2. 收集接口改动后，在被测仓库运行 `node node_modules/@nekosu/maa-tools/bin/maa-tools test --list --json`，检查已安装包的版本范围、必需结构、绝对文件路径、原始下标、源码范围、坏文件及来源拒绝；另用单独 `--list` 检查人类列表与同一收集结果一致。非默认配置传相同路径，两种收集都不准备 MaaFramework。
 3. 运行接口改动后，用该仓库存在的用例执行：
 
     ```bash
@@ -83,7 +85,7 @@ description: 修改 Maa 节点测试 VS Code 插件时使用。覆盖编辑辅�
 
 ## 容易误判的地方
 
-- 包版本在支持范围内且类型声明正确，不等于返回值可信；最终结果与每条即时快照都要检查必需结构、记录 `type`、来源、选择覆盖和最终一致性，不能把任意子进程消息交给面板。
+- 包版本在支持范围内且类型声明正确，不等于返回值可信；最终结果与每条即时快照都要检查必需结构、记录 `type`、来源、原始下标、选择覆盖、汇总和最终一致性，不能把任意子进程消息交给面板。编辑辅助和未知字段检查都不能代替来源的结构、类型与身份校验。
 - 快照只对自己的文件/用例范围负责；与最终结果核对具体事实，不要求快照的整批状态或经过时间等于整批最终值。
 - 缺图是 `skipped`，不是通过；全缺图文件由框架报错。扩展直接消费框架 verdict，不根据有没有失败明细自行推断。
 - 摘要只统计明确返回的通过，不能用“总数减失败数”推算；未返回结果必须单列。

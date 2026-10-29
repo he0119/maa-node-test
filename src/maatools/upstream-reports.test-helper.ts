@@ -2,64 +2,6 @@
 import type {ResultDocument} from "./protocol";
 export const upstreamReports: Record<"partialError" | "partialMissing" | "allMissing" | "empty", ResultDocument> = {
     partialError: {
-        groups: [
-            {
-                name: "same name",
-                controller: "Desktop",
-                resource: "CN",
-                verdict: "pass",
-                cases: [
-                    {
-                        image: "a.png",
-                        imagePath: "/images/Desktop/a.png",
-                        verdict: "pass",
-                        checks: [
-                            {
-                                node: "Node",
-                                expected: "hit",
-                                hit: true,
-                                detail: null,
-                                ok: true,
-                            },
-                        ],
-                        durationMs: 3,
-                        origin: {
-                            file: "/repo/tests/test_a.json",
-                            case: 1,
-                        },
-                    },
-                ],
-                durationMs: 3,
-            },
-            {
-                name: "same name",
-                controller: "Desktop",
-                resource: "CN",
-                verdict: "pass",
-                cases: [
-                    {
-                        image: "b.png",
-                        imagePath: "/images/Desktop/b.png",
-                        verdict: "pass",
-                        checks: [
-                            {
-                                node: "Node",
-                                expected: "hit",
-                                hit: true,
-                                detail: null,
-                                ok: true,
-                            },
-                        ],
-                        durationMs: 3,
-                        origin: {
-                            file: "/repo/tests/test_b.json",
-                            case: 2,
-                        },
-                    },
-                ],
-                durationMs: 3,
-            },
-        ],
         files: [
             {
                 file: "/repo/tests/test_a.json",
@@ -194,56 +136,6 @@ export const upstreamReports: Record<"partialError" | "partialMissing" | "allMis
         reason: "no-result",
     },
     partialMissing: {
-        groups: [
-            {
-                name: "same name",
-                controller: "Desktop",
-                resource: "CN",
-                verdict: "pass",
-                cases: [
-                    {
-                        image: "a.png",
-                        imagePath: "/images/Desktop/a.png",
-                        verdict: "pass",
-                        checks: [
-                            {
-                                node: "Node",
-                                expected: "hit",
-                                hit: true,
-                                detail: null,
-                                ok: true,
-                            },
-                        ],
-                        durationMs: 3,
-                        origin: {
-                            file: "/repo/tests/test_a.json",
-                            case: 1,
-                        },
-                    },
-                ],
-                durationMs: 3,
-            },
-            {
-                name: "same name",
-                controller: "Mobile",
-                resource: "CN",
-                verdict: "skipped",
-                cases: [
-                    {
-                        image: "a.png",
-                        imagePath: "/images/Mobile/a.png",
-                        verdict: "skipped",
-                        checks: [],
-                        durationMs: 0,
-                        origin: {
-                            file: "/repo/tests/test_a.json",
-                            case: 1,
-                        },
-                    },
-                ],
-                durationMs: 0,
-            },
-        ],
         files: [
             {
                 file: "/repo/tests/test_a.json",
@@ -321,28 +213,6 @@ export const upstreamReports: Record<"partialError" | "partialMissing" | "allMis
         status: "passed",
     },
     allMissing: {
-        groups: [
-            {
-                name: "same name",
-                controller: "Desktop",
-                resource: "CN",
-                verdict: "skipped",
-                cases: [
-                    {
-                        image: "a.png",
-                        imagePath: "/images/Desktop/a.png",
-                        verdict: "skipped",
-                        checks: [],
-                        durationMs: 0,
-                        origin: {
-                            file: "/repo/tests/test_a.json",
-                            case: 1,
-                        },
-                    },
-                ],
-                durationMs: 0,
-            },
-        ],
         files: [
             {
                 file: "/repo/tests/test_a.json",
@@ -399,7 +269,6 @@ export const upstreamReports: Record<"partialError" | "partialMissing" | "allMis
         reason: "no-tests-verified",
     },
     empty: {
-        groups: [],
         files: [
             {
                 file: "/repo/tests/test_a.json",

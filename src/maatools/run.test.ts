@@ -6,7 +6,7 @@ import {test, type TestContext} from "node:test";
 
 import {startMaaToolsRun} from "./run";
 import {runChild} from "./process";
-import {fixtureResult} from "./result-builders.test-helper";
+import {fixtureResult, platformResult} from "./result-builders.test-helper";
 import {collectTests} from "./collect";
 import {upstreamReports} from "./upstream-reports.test-helper";
 import type {TestRunEvent} from "./protocol";
@@ -241,11 +241,12 @@ test("顶层失败与文件通过矛盾时清空所有可通过Map", async (t) =
 test("遗漏所选用例或缺少必需字段不返回部分通过", async (t) => {
     for (const mode of [
         "omitted",
-        "missing-groups",
+        "missing-platform-field",
     ] as const) {
         const {root} = fakeWorkspace(t, (workspace: string) => {
             const doc = fixtureResult(workspace);
-            if (mode === "missing-groups") delete (doc as unknown as Record<string, unknown>).groups;
+            if (mode === "missing-platform-field")
+                delete (doc.files[0].cases[0].platforms[0] as unknown as Record<string, unknown>).controller;
             return doc;
         });
         const outcome = await startMaaToolsRun({
@@ -268,12 +269,136 @@ test("遗漏所选用例或缺少必需字段不返回部分通过", async (t) =
     }
 });
 
+test("文件最终结果缺少来源或来源不匹配时清除即时通过", async (t) => {
+    for (const mode of [
+        "missing",
+        "malformed",
+        "wrong-file",
+        "wrong-case",
+    ] as const) {
+        const {root} = fakeWorkspace(
+            t,
+            (workspace: string) => {
+                const result = fixtureResult(workspace);
+                const platform = result.files[0].cases[0].platforms[0].result;
+                if (mode === "missing") delete (platform as unknown as Record<string, unknown>).origin;
+                if (mode === "malformed") (platform as unknown as Record<string, unknown>).origin = [];
+                if (mode === "wrong-file") platform.origin.file = `${workspace}/tests/test_other.json`;
+                if (mode === "wrong-case") platform.origin.case = 3;
+                return result;
+            },
+            {events: (workspace) => [liveCase(workspace, 1)]},
+        );
+        let published = 0;
+        const outcome = await startMaaToolsRun(
+            {workspaceRoot: root, nodePath: process.execPath, testFiles: ["tests/test_a.json"]},
+            {onProgress: () => published++},
+        ).done;
+        assert.equal(published, 1, mode);
+        assert.equal(outcome.errorCode, "invalid-result", mode);
+        assert.match(outcome.error!, /来源|origin/);
+        assert.equal(outcome.fileResults.size, 0);
+        assert.equal(outcome.caseResults.size, 0);
+    }
+});
+
+test("文件错误与失败并存保留根error及失败明细，伪造failed或passed拒绝", async (t) => {
+    for (const status of [
+        "error",
+        "failed",
+        "passed",
+    ] as const) {
+        const {root} = fakeWorkspace(t, (workspace: string) => {
+            const result = fixtureResult(workspace, [1]);
+            const file = result.files[0];
+            file.cases[0].platforms[0].result = platformResult(file.file, 1, "Desktop", "fail");
+            file.cases[0].verdict = "fail";
+            file.verdict = "fail";
+            file.error = "test-file-error";
+            file.reason = file.error;
+            result.status = status;
+            result.errorCode = "test-file-error";
+            return result;
+        });
+        const outcome = await startMaaToolsRun({
+            workspaceRoot: root,
+            nodePath: process.execPath,
+            testFiles: ["tests/test_a.json"],
+        }).done;
+        if (status === "error") {
+            assert.equal(outcome.errorCode, "test-file-error");
+            assert.equal(outcome.result?.status, "error");
+            assert.equal(outcome.fileResults.get("tests/test_a.json"), "fail");
+            assert.equal(outcome.caseResults.get("tests/test_a.json#1")?.verdict, "fail");
+            assert.ok(outcome.error);
+        } else {
+            assert.equal(outcome.errorCode, "invalid-result", status);
+            assert.match(outcome.error!, status === "failed" ? /failed 掩盖了运行错误/ : /passed.*矛盾/);
+            assert.equal(outcome.fileResults.size, 0);
+            assert.equal(outcome.caseResults.size, 0);
+        }
+    }
+});
+
+test("文件fail不能让最终failed掩盖同时发生的平台错误", async (t) => {
+    const {root} = fakeWorkspace(t, (workspace: string) => {
+        const result = fixtureResult(workspace, [1]);
+        const file = result.files[0];
+        file.cases[0].platforms[0].result = platformResult(file.file, 1, "Desktop", "fail");
+        file.cases[0].platforms.push({
+            controller: "Mobile",
+            resource: "CN",
+            result: {...platformResult(file.file, 1, "Mobile", "error"), error: "test-execution-failed"},
+        });
+        file.cases[0].verdict = "fail";
+        file.verdict = "fail";
+        result.status = "failed";
+        return result;
+    });
+    const outcome = await startMaaToolsRun({
+        workspaceRoot: root,
+        nodePath: process.execPath,
+        testFiles: ["tests/test_a.json"],
+    }).done;
+    assert.equal(outcome.errorCode, "invalid-result");
+    assert.match(outcome.error!, /failed 掩盖了运行错误/);
+    assert.equal(outcome.caseResults.size, 0);
+});
+
+test("全缺图与坏文件保留合法error文件，不被当成协议损坏或通过", async (t) => {
+    for (const mode of [
+        "all-missing",
+        "bad-file",
+    ] as const) {
+        const {root} = fakeWorkspace(t, (workspace: string) => {
+            if (mode === "all-missing") return inWorkspace(upstreamReports.allMissing, workspace);
+            const result = fixtureResult(workspace, []);
+            result.status = "error";
+            result.errorCode = "test-file-error";
+            result.files[0].verdict = "error";
+            result.files[0].error = "test-file-error";
+            return result;
+        });
+        const outcome = await startMaaToolsRun({
+            workspaceRoot: root,
+            nodePath: process.execPath,
+            testFiles: ["tests/test_a.json"],
+        }).done;
+        assert.notEqual(outcome.errorCode, "invalid-result", mode);
+        assert.ok(outcome.error, mode);
+        assert.equal(outcome.fileResults.get("tests/test_a.json"), "error", mode);
+        assert.equal(
+            outcome.caseResults.get("tests/test_a.json#1")?.verdict,
+            mode === "all-missing" ? "skipped" : undefined,
+        );
+    }
+});
+
 test("按错误代码区别配置启动失败与无匹配，不猜英文reason", async (t) => {
     const {root} = fakeWorkspace(t, {
         status: "error",
         errorCode: "config-load-failed",
         reason: "no tests matched arbitrary text",
-        groups: [],
         files: [],
         durationMs: 0,
     });
@@ -362,7 +487,6 @@ test("实际发现传--list --json、文件过滤与自定义配置，并转换�
     const error = fakeWorkspace(t, {
         status: "error",
         files: [],
-        groups: [],
         durationMs: 0,
         errorCode: "collection-source-missing",
         reason: "loader discarded origin",
@@ -774,7 +898,6 @@ test("取消保留已经收到file-result的空选择跳过，不误报协议错
             const result = fixtureResult(workspace, []);
             result.status = "empty";
             result.errorCode = "no-tests-matched";
-            result.groups = [];
             result.files[0].verdict = "skipped";
             result.files[0].reason = "no-cases-selected";
             return [{type: "file-result", file: result.files[0].file, result}];

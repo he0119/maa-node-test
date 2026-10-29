@@ -4,7 +4,7 @@ import {caseKeyOf, type CaseOutcome, type CaseVerdict, type FileVerdict} from ".
 import {displayPath, pathKey} from "../core/paths";
 import type {CaseCheck, ResultDocument, RunFileResult} from "./protocol";
 
-export type {CaseCheck, CaseOrigin, RunCaseResult, RunFileCaseResult, RunFileResult, RunGroupResult} from "./protocol";
+export type {CaseCheck, CaseOrigin, RunCaseResult, RunFileCaseResult, RunFileResult} from "./protocol";
 
 /** 元数据来自运行结果，不读取或解析本地测试文件。 */
 export interface FileEntry extends Omit<RunFileResult, "file"> {

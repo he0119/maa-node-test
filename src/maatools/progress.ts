@@ -39,7 +39,7 @@ function platformFacts(result: RunCaseResult) {
     return {
         ...result,
         imagePath: pathKey(result.imagePath),
-        ...(result.origin ? {origin: {...result.origin, file: pathKey(result.origin.file)}} : {}),
+        origin: {...result.origin, file: pathKey(result.origin.file)},
     };
 }
 
@@ -219,10 +219,7 @@ export class RunProgress {
 
     /** 取消或进程异常时只交回已校验的完成事实；单条快照不表示整个文件完成。 */
     partial(): ReturnType<typeof adaptResultFiles> {
-        const partial = adaptResultFiles(
-            {status: "error", groups: [], files: [], durationMs: 0},
-            this.selection.workspaceRoot,
-        );
+        const partial = adaptResultFiles({status: "error", files: [], durationMs: 0}, this.selection.workspaceRoot);
         for (const document of this.fileDocuments.values()) {
             const completed = adaptResultFiles(document, this.selection.workspaceRoot);
             partial.entries.push(...completed.entries);

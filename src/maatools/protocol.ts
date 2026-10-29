@@ -2,7 +2,7 @@
 
 import {isDeepStrictEqual} from "node:util";
 
-import {isAbsolutePath, pathKey, resolveFromWorkspace, samePath} from "../core/paths";
+import {isAbsolutePath, pathKey, resolveFromWorkspace} from "../core/paths";
 
 /** 文件跳过仅表示本次筛选未选择用例。 */
 export type FileVerdict = "pass" | "fail" | "error" | "skipped";
@@ -57,17 +57,7 @@ export interface RunCaseResult {
     checks: CaseCheck[];
     durationMs: number;
     error?: string;
-    origin?: CaseOrigin;
-}
-
-export interface RunGroupResult {
-    name: string;
-    source?: string;
-    controller: string;
-    resource: string;
-    verdict: CaseOutcome;
-    cases: RunCaseResult[];
-    durationMs: number;
+    origin: CaseOrigin;
 }
 
 export interface RunFileCaseResult extends ListCase {
@@ -86,7 +76,6 @@ export interface RunFileResult extends Omit<ListFileEntry, "cases"> {
 
 export interface ResultDocument {
     status: "passed" | "failed" | "error" | "empty";
-    groups: RunGroupResult[];
     files: RunFileResult[];
     durationMs: number;
     errorCode?: string;
@@ -222,11 +211,9 @@ function runCase(value: unknown, at: string): void {
     verdict(value.verdict, `${at}.verdict`);
     duration(value.durationMs, `${at}.durationMs`);
     optionalText(value.error, `${at}.error`);
-    if (value.origin !== undefined) {
-        object(value.origin, `${at}.origin`);
-        absoluteFile(value.origin.file, `${at}.origin.file`);
-        index(value.origin.case, `${at}.origin.case`);
-    }
+    object(value.origin, `${at}.origin`);
+    absoluteFile(value.origin.file, `${at}.origin.file`);
+    index(value.origin.case, `${at}.origin.case`);
     array(value.checks, `${at}.checks`);
     value.checks.forEach((check, i) => {
         const location = `${at}.checks[${i}]`;
@@ -245,40 +232,42 @@ function runCase(value: unknown, at: string): void {
             if (check.detail.box !== undefined) rectangle(check.detail.box, `${location}.detail.box`);
         }
     });
+    if (value.imagePath === "") {
+        requireValue(
+            notExecuted(value as unknown as RunCaseResult),
+            `${at} 尚未执行的错误占位包含识别事实或缺少错误原因`,
+        );
+    } else {
+        absoluteFile(value.imagePath, `${at}.imagePath`);
+    }
     requireValue(
         value.verdict !== "pass" || (value.checks.length > 0 && value.checks.every((check) => (check as CaseCheck).ok)),
         `${at} 标记通过但没有有效检查或包含失败检查`,
     );
 }
 
-/** 检查汇总是否掩盖底层失败；不在扩展中生成领域结论。 */
-function checkAggregate(aggregate: CaseOutcome, children: readonly CaseOutcome[], at: string): void {
-    if (aggregate === "pass") {
-        requireValue(
-            children.length > 0 && children.every((item) => item === "pass"),
-            `${at} 标记通过但子结果未全部通过`,
-        );
-    }
-    if (aggregate === "skipped") {
-        requireValue(
-            children.length > 0 && !children.some((item) => item === "fail" || item === "error"),
-            `${at} 标记跳过但包含失败或错误`,
-        );
-    }
-    if (aggregate === "error") {
-        requireValue(!children.includes("fail"), `${at} 标记错误但包含断言失败`);
-    }
+/** 空图片路径只用于尚未执行的错误占位，不可包含识别事实。 */
+function notExecuted(result: RunCaseResult): boolean {
+    return (
+        result.verdict === "error" &&
+        result.imagePath === "" &&
+        result.checks.length === 0 &&
+        result.durationMs === 0 &&
+        typeof result.error === "string" &&
+        result.error.length > 0
+    );
 }
 
-function sameResult(left: RunCaseResult, right: RunCaseResult): boolean {
-    return (
-        left.image === right.image &&
-        samePath(left.imagePath, right.imagePath) &&
-        left.verdict === right.verdict &&
-        left.durationMs === right.durationMs &&
-        left.error === right.error &&
-        isDeepStrictEqual(left.checks, right.checks)
-    );
+/** 只核对上游平台结论的汇总，不重新判断识别或识别框。 */
+function checkAggregate(aggregate: CaseOutcome, children: readonly CaseOutcome[], at: string): void {
+    const expected = children.includes("fail")
+        ? "fail"
+        : children.length === 0 || children.includes("error")
+          ? "error"
+          : children.includes("skipped")
+            ? "skipped"
+            : "pass";
+    requireValue(aggregate === expected, `${at} 标记 ${aggregate} 但平台结论应汇总为 ${expected}`);
 }
 
 /** 仅接受完整的已知协议；省略字段、来源断裂或失败被汇总成通过都按格式错误处理。 */
@@ -295,31 +284,6 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
         `不支持的运行状态 ${String(value.status)}`,
     );
     duration(value.durationMs, "durationMs");
-    array(value.groups, "groups");
-    value.groups.forEach((group, i) => {
-        const at = `groups[${i}]`;
-        object(group, at);
-        text(group.name, `${at}.name`);
-        optionalText(group.source, `${at}.source`);
-        text(group.controller, `${at}.controller`);
-        text(group.resource, `${at}.resource`);
-        verdict(group.verdict, `${at}.verdict`);
-        duration(group.durationMs, `${at}.durationMs`);
-        array(group.cases, `${at}.cases`);
-        group.cases.forEach((item, j) => runCase(item, `${at}.cases[${j}]`));
-        const caseVerdicts = (group.cases as RunCaseResult[]).map((item) => item.verdict);
-        if (group.verdict === "pass") {
-            requireValue(
-                caseVerdicts.includes("pass") && caseVerdicts.every((item) => item === "pass" || item === "skipped"),
-                `${at} 标记通过但没有验证结果或包含失败/错误`,
-            );
-        }
-        if (group.verdict === "skipped")
-            requireValue(
-                caseVerdicts.length > 0 && caseVerdicts.every((item) => item === "skipped"),
-                `${at} 标记跳过但子结果不一致`,
-            );
-    });
     value.files.forEach((file, i) => {
         const at = `files[${i}]`;
         const item = file as unknown as RunFileResult;
@@ -361,8 +325,8 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
                 runCase(platform.result, `${platformAt}.result`);
                 const origin = platform.result.origin;
                 requireValue(
-                    origin && pathKey(origin.file) === pathKey(item.file) && origin.case === testCase.index,
-                    `${platformAt} 缺少或使用了错误的用例来源`,
+                    pathKey(origin.file) === pathKey(item.file) && origin.case === testCase.index,
+                    `${platformAt} 使用了错误的用例来源`,
                 );
                 requireValue(platform.result.image === testCase.image, `${platformAt} 截图与文件元数据不一致`);
             });
@@ -372,52 +336,58 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
                 location,
             );
         });
-        if (item.verdict === "pass") {
-            requireValue(
-                !item.cases.some((testCase) => testCase.verdict === "fail" || testCase.verdict === "error"),
-                `${at} 标记通过但包含失败或错误用例`,
+        if (item.verdict !== "skipped") {
+            const caseVerdicts = item.cases.map((testCase) => testCase.verdict);
+            const verified = item.cases.some((testCase) =>
+                testCase.platforms.some((platform) => platform.result.verdict === "pass"),
             );
-            requireValue(
-                item.cases.some((testCase) =>
-                    testCase.platforms.some((platform) => platform.result.verdict === "pass"),
-                ),
-                `${at} 标记通过但没有实际验证结果`,
-            );
+            const expected = caseVerdicts.includes("fail")
+                ? "fail"
+                : item.error || caseVerdicts.includes("error") || !verified
+                  ? "error"
+                  : "pass";
+            requireValue(item.verdict === expected, `${at} 标记 ${item.verdict} 但文件结论应汇总为 ${expected}`);
         }
     });
     const result = value as unknown as ResultDocument;
-    const fileVerdicts = result.files.map((file) => file.verdict);
-    const groupVerdicts = result.groups.map((group) => group.verdict);
+    const files = result.files;
+    const cases = files.flatMap((file) => file.cases);
+    const platforms = cases.flatMap((testCase) => testCase.platforms.map((platform) => platform.result));
+    const hasFailure =
+        files.some((file) => file.verdict === "fail") ||
+        cases.some((testCase) => testCase.verdict === "fail") ||
+        platforms.some((platform) => platform.verdict === "fail");
+    const hasError =
+        files.some((file) => file.verdict === "error" || Boolean(file.error)) ||
+        cases.some((testCase) => testCase.verdict === "error") ||
+        platforms.some((platform) => platform.verdict === "error");
     if (result.status === "passed") {
+        requireValue(!hasFailure && !hasError, "顶层 passed 与文件、用例或平台结论矛盾");
         requireValue(
-            fileVerdicts.every((item) => item === "pass" || item === "skipped") &&
-                !groupVerdicts.some((item) => item === "fail" || item === "error"),
-            "顶层 passed 与文件或组结论矛盾",
-        );
-        requireValue(
-            fileVerdicts.includes("pass") || groupVerdicts.includes("pass"),
+            platforms.some((platform) => platform.verdict === "pass"),
             "顶层 passed 却没有实际验证通过的结果",
         );
     }
     if (result.status === "failed") {
-        requireValue(
-            fileVerdicts.includes("fail") || (result.files.length === 0 && groupVerdicts.includes("fail")),
-            "顶层 failed 却没有失败文件",
-        );
-        requireValue(!fileVerdicts.includes("error") && !groupVerdicts.includes("error"), "顶层 failed 掩盖了运行错误");
+        requireValue(hasFailure, "顶层 failed 却没有失败文件");
+        requireValue(!hasError, "顶层 failed 掩盖了运行错误");
     }
     if (result.status === "empty") {
         requireValue(result.errorCode === "no-tests-matched", "empty 必须提供 no-tests-matched 错误代码");
         requireValue(
-            !result.groups.some((group) => group.cases.length > 0) &&
-                fileVerdicts.every((item) => item === "error" || item === "skipped"),
+            files.every((file) => file.verdict === "error" || file.verdict === "skipped") &&
+                cases.every((testCase) => testCase.verdict === "error" && testCase.durationMs === 0) &&
+                platforms.every(notExecuted),
             "empty 却包含已运行的测试结果",
         );
     }
-    // 配置或进程准备失败时可能还没有文件元数据；必须由错误代码明确说明。
-    if (result.status === "error" && result.files.length === 0 && result.groups.length === 0) {
-        requireValue(typeof result.errorCode === "string" && result.errorCode.length > 0, "启动错误缺少 errorCode");
-        return result;
+    if (result.status === "error") {
+        requireValue(
+            hasError || (typeof result.errorCode === "string" && result.errorCode.length > 0),
+            "顶层 error 缺少错误结果或明确的全局 errorCode",
+        );
+        // 配置或进程准备失败时可能还没有文件元数据；必须由错误代码明确说明。
+        if (files.length === 0) return result;
     }
 
     const requested = new Set(
@@ -454,36 +424,6 @@ export function validateResultDocument(value: unknown, selection: ResultSelectio
         }
     }
 
-    const grouped = result.groups.flatMap((group) => group.cases.map((testCase) => ({group, testCase})));
-    const used = new Set<number>();
-    for (const file of result.files) {
-        for (const testCase of file.cases) {
-            for (const platform of testCase.platforms) {
-                const match = grouped.findIndex(
-                    ({group, testCase: actual}, i) =>
-                        !used.has(i) &&
-                        group.controller === platform.controller &&
-                        group.resource === platform.resource &&
-                        actual.origin !== undefined &&
-                        platform.result.origin !== undefined &&
-                        samePath(actual.origin.file, platform.result.origin.file) &&
-                        actual.origin?.case === testCase.index &&
-                        sameResult(actual, platform.result),
-                );
-                const notExecuted =
-                    platform.result.verdict === "error" &&
-                    platform.result.imagePath === "" &&
-                    platform.result.checks.length === 0 &&
-                    platform.result.durationMs === 0 &&
-                    typeof platform.result.error === "string" &&
-                    platform.result.error.length > 0 &&
-                    (result.status === "error" || result.status === "empty");
-                requireValue(match >= 0 || notExecuted, `${file.file}#${testCase.index} 的平台结果没有对应测试组`);
-                if (match >= 0) used.add(match);
-            }
-        }
-    }
-    requireValue(used.size === grouped.length, "测试组有未归入所选文件的结果（来源缺失、遗漏或汇总矛盾）");
     return result;
 }
 

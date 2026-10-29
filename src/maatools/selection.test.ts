@@ -25,7 +25,6 @@ function emptyResult(file = "/repo/tests/test_b.json"): ResultDocument {
     const result = fixtureResult();
     result.status = "empty";
     result.errorCode = "no-tests-matched";
-    result.groups = [];
     result.files = [
         {...result.files[0], file, verdict: "skipped", reason: "no-cases-selected", selectedCases: [], cases: []},
     ];
@@ -39,9 +38,9 @@ function mixed(failed = false): ResultDocument {
         result.status = "failed";
         result.files[0].verdict = "fail";
         result.files[0].cases[0].verdict = "fail";
-        result.groups[0].verdict = "fail";
-        result.groups[0].cases[0].verdict = "fail";
-        result.groups[0].cases[0].checks[0].ok = false;
+        const platform = result.files[0].cases[0].platforms[0].result;
+        platform.verdict = "fail";
+        platform.checks[0].ok = false;
     }
     return result;
 }
@@ -191,9 +190,8 @@ function source(result: ResultDocument, file: string): ResultDocument {
     for (const entry of result.files) {
         entry.file = file;
         for (const testCase of entry.cases)
-            for (const platform of testCase.platforms) platform.result.origin!.file = file;
+            for (const platform of testCase.platforms) platform.result.origin.file = file;
     }
-    for (const group of result.groups) for (const testCase of group.cases) testCase.origin!.file = file;
     return result;
 }
 
@@ -211,8 +209,7 @@ test("Windows请求/来源/expectedCases、事件去重和最终核对共享身�
         };
         const first = source(fixtureResult("C:/Repo", [1]), "c:\\REPO\\Tests\\Test_A.json");
         first.files[0].cases[0].name = "Case One";
-        first.groups = structuredClone(first.groups);
-        first.groups[0].cases[0].origin!.file = "C:/repo/TESTS/test_a.JSON";
+        first.files[0].cases[0].platforms[0].result.origin.file = "C:/repo/TESTS/test_a.JSON";
         validateResultDocument(first, requested);
         const progress = new RunProgress(requested);
         const event: TestRunEvent = {
@@ -222,7 +219,6 @@ test("Windows请求/来源/expectedCases、事件去重和最终核对共享身�
         };
         assert.ok(progress.accept(event));
         const upper = source(structuredClone(first), "C:/REPO/TESTS/TEST_A.JSON");
-        for (const group of upper.groups) for (const item of group.cases) item.imagePath = item.imagePath.toUpperCase();
         for (const item of upper.files[0].cases)
             for (const platform of item.platforms) platform.result.imagePath = platform.result.imagePath.toUpperCase();
         assert.equal(progress.accept({...event, origin: {file: upper.files[0].file, case: 1}, result: upper}), null);
@@ -263,7 +259,6 @@ test("非Windows保留大小写及合法反斜杠文件名，结果和用例键�
         const result = fixtureResult("/repo", [1]);
         const other = source(structuredClone(result), "/repo/tests\\test_a.json");
         result.files.push(other.files[0]);
-        result.groups.push(...other.groups);
         validateResultDocument(result, {
             workspaceRoot: "/repo",
             testFiles: [

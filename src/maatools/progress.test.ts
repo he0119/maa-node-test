@@ -77,7 +77,6 @@ test("结果事件必须是与来源一致的单case或单file完整快照", () 
     const startup: ResultDocument = {
         status: "error",
         errorCode: "config-load-failed",
-        groups: [],
         files: [],
         durationMs: 0,
     };
@@ -145,14 +144,6 @@ test("单case快照文件error不妨碍最终文件因其他有效用例而pass"
     result.files[0].selectedCases.push(3);
     result.files[0].verdict = "pass";
     result.files[0].reason = "some-platforms-skipped";
-    result.groups.push({
-        name: "other",
-        controller: "Desktop",
-        resource: "CN",
-        verdict: "pass",
-        cases: [passed.platforms[0].result],
-        durationMs: 3,
-    });
     result.status = "passed";
     delete result.errorCode;
     delete result.reason;
@@ -182,7 +173,6 @@ test("最终必须覆盖已开始但未完成的来源，启动错误不能吞�
                 status: "error",
                 errorCode: "test-execution-failed",
                 files: [],
-                groups: [],
                 durationMs: 0,
             }),
         /遗漏/,
@@ -199,6 +189,53 @@ test("取消partial保留完成case，只有file-result才能把文件当作完�
     partial = progress.partial();
     assert.equal(partial.fileResults.get("tests/test_a.json"), "pass");
     assert.equal(partial.caseResults.size, 2);
+});
+
+test("同控制器资源的多个实际平台按多重集合对账，顺序改变可接受而遗漏不能接受", () => {
+    const result = fixtureResult("/repo", [1]);
+    const testCase = result.files[0].cases[0];
+    const another = structuredClone(testCase.platforms[0]);
+    another.result.imagePath = "/other-images/Desktop/case-1.png";
+    another.result.durationMs = 7;
+    testCase.platforms.push(another, structuredClone(another));
+    testCase.durationMs = 17;
+    const progress = new RunProgress(selection);
+    assert.ok(progress.accept(caseEvent(1, result)));
+    const reordered = structuredClone(result);
+    reordered.files[0].cases[0].platforms.reverse();
+    assert.equal(progress.accept(caseEvent(1, reordered)), null);
+    const final = fixtureResult();
+    final.files[0].cases[0] = structuredClone(reordered.files[0].cases[0]);
+    finalCheck(progress, final);
+    const dropped = structuredClone(final);
+    dropped.files[0].cases[0].platforms.pop();
+    assert.throws(() => finalCheck(progress, dropped), /已完成用例结果不一致/);
+    const multiplicity = structuredClone(result);
+    multiplicity.files[0].cases[0].platforms[1] = structuredClone(testCase.platforms[0]);
+    assert.throws(() => progress.accept(caseEvent(1, multiplicity)), /重复用例结果互相矛盾/);
+});
+
+test("唯一files平台的图片路径、检查和来源不能在快照后改变", () => {
+    const progress = new RunProgress(selection);
+    progress.accept(caseEvent(1));
+    for (const mutate of [
+        (result: ResultDocument) => {
+            result.files[0].cases[0].platforms[0].result.imagePath = "/different/case-1.png";
+        },
+        (result: ResultDocument) => {
+            result.files[0].cases[0].platforms[0].result.checks[0].node = "OtherNode";
+        },
+        (result: ResultDocument) => {
+            result.files[0].cases[0].platforms[0].result.durationMs++;
+        },
+    ]) {
+        const changed = fixtureResult();
+        mutate(changed);
+        assert.throws(() => finalCheck(progress, changed), /已完成用例结果不一致/);
+    }
+    const wrongOrigin = fixtureResult();
+    wrongOrigin.files[0].cases[0].platforms[0].result.origin.case = 3;
+    assert.throws(() => finalCheck(progress, wrongOrigin), /来源/);
 });
 
 test("回调或调用方修改消息不能污染保存的事实", () => {

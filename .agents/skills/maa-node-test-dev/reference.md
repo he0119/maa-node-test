@@ -55,7 +55,7 @@
 4. **编辑辅助**：provider 将当前文本、光标位置和设置交给对应的 core 模块；[repoIndex.ts](../../../src/core/repoIndex.ts) 读取并缓存仓库资料，[screenshots.ts](../../../src/core/screenshots.ts) 查图，[png.ts](../../../src/core/png.ts) 读取尺寸。core 返回普通数据或文字，provider 创建 VS Code 对象；这些结果不决定实际收集范围或测试结论。
 5. **工具版本**：[toolVersionStatus.ts](../../../src/toolVersionStatus.ts) 根据配置和依赖变化调用安装模块查询版本，由 [toolStatus.ts](../../../src/core/toolStatus.ts) 生成文字，再更新状态栏与兼容提示；二者共用查询结果。
 
-测试树的文件灰字只保留组名，未命名时留空；用例标题优先取非空 `name`，否则用截图名或原始序号。普通用例不加描述，负例、缺少截图名、缺图和读取失败保留短提示。控制器、资源及预期节点详情在源文件和运行输出中查看，不在每行重复。
+测试树的文件灰字只保留组名，未命名时留空；用例标题优先取非空 `name`，否则用截图名或原始序号。普通用例不加描述，负例、缺少截图名、缺图和读取失败保留短提示；树节点不设置额外 tooltip。控制器、资源及预期节点详情在源文件和运行输出中查看，不在每行重复。
 
 ## 为什么使用仓库里的 maa-tools
 
@@ -90,9 +90,9 @@ JSON 兼容性随 maa-tools 包版本管理。1.x 内可以增加旧插件可忽
 
 收集和运行均加载同一份配置并展开 `test.cases`；它可以是数组或异步函数。收集只省略 MaaFramework 初始化与识别，不绕过 loader，也不固定扫描某个目录来代替配置。
 
-maa-tools 的 `loadTestCases()` 和 `loadAllTestCases()` 共用文件读取与结构校验，并给每条用例填 `origin: {file, case}`：`file` 是规范化绝对路径，`case` 是源文件 `cases` 数组的原始下标。loader 展开控制器或资源时必须保留它，例如复制用例时保留 `...testCase`。手写 origin 也必须满足绝对路径和非负安全整数下标，格式非法时报 `test-source-invalid`，与完全没有来源的程序组不同。组名只用于显示，重复组名、相同截图、相同节点或不同期望框不构成来源依据。
+只支持文件测试。展开后的 `TestCases.cases.origin` 与平台结果 `TestCaseRunResult.origin` 在类型和运行时都必填，内容为 `origin: {file, case}`：`file` 是实际测试 JSON 文件的规范化绝对路径，`case` 是源文件 `cases` 数组的原始下标，须为非负安全整数。普通测试 JSON 仍只写 `name`、`image`、`hits` 等字段，不用手写 origin；`loadTestCases()` 和 `loadAllTestCases()` 共用文件读取与结构校验，自动补齐来源。自定义 loader 展开控制器或资源时必须保留它，例如复制用例时保留 `...testCase`；动态生成的展开对象也须关联实际文件和原始下标。
 
-收集仅列出实际进入配置展开结果的文件与原始下标，不把“曾被读取但配置主动排除”的有效文件当成可运行测试。读取失败的文件保留 `error` 条目，供面板单独报错。没有来源的程序生成组会产生清楚的收集错误；全量库调用可运行这种组并返回 `groups`，但按文件选择不能猜来源。
+收集仅列出实际进入配置展开结果的文件与原始下标，不把“曾被读取但配置主动排除”的有效文件当成可运行测试。读取失败的文件保留 `error` 条目，供面板单独报错。缺少、格式无效或无法对应文件元数据与原始下标的 origin 在加载计划阶段报 `test-source-invalid`，不能进入识别。组名只用于显示，重复组名、相同截图、相同节点或不同期望框不构成来源依据。
 
 ## 命令接口
 
@@ -118,7 +118,7 @@ node node_modules/@nekosu/maa-tools/bin/maa-tools --version
 
 ## 收集结果
 
-`--list --json` 成功收集的顶层为 `{files: [...]}`。收集失败含 `errorCode`、`reason`，CLI 顶层错误结果还带 `status: 'error'`、`groups` 和 `durationMs`；可以保留已经识别的文件。单独 `--list` 将同一结果显示为文件、原始下标、名称或截图、文件错误及总数，不输出这份 JSON。
+`--list --json` 成功收集的顶层为 `{files: [...]}`。收集失败含 `errorCode`、`reason`，CLI 顶层错误结果还带 `status: 'error'` 和 `durationMs`；可以保留已经识别的文件。单独 `--list` 将同一结果显示为文件、原始下标、名称或截图、文件错误及总数，不输出这份 JSON。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -138,12 +138,13 @@ node node_modules/@nekosu/maa-tools/bin/maa-tools --version
 
 ```text
 status: passed | failed | error | empty
-groups: TestGroupRunResult[]
 files: TestFileRunResult[]
 durationMs: number
 errorCode?: string
 reason?: string
 ```
+
+报告不含 `groups` 或 `schemaVersion`。`files` 是全部结果的唯一公开明细；内部仍按组展开、固定节点、调度与并行判定，文本日志保留组显示，执行组不作为报告副本返回。
 
 `files[]` 由 maa-tools 汇总，包含元数据、`selectedCases`、`verdict`（pass/fail/error/skipped）、可选 `reason` 和 `cases`。`selectedCases` 是本次计划下标，允许不连续，`cases` 必须完整覆盖它。无文件错误且过滤后本次 cases 为空时，文件为 skipped、reason 为 `no-cases-selected`，两个数组都为空。
 
@@ -151,7 +152,7 @@ reason?: string
 
 每条文件用例包含收集元数据、`verdict`、`durationMs`、可选 `reason` 和 `platforms[]`。每个平台项含 `controller`、`resource`、`result`；平台结果给出检查明细、单个 `origin` 和结论。已解析图片路径时，`imagePath` 是实际绝对路径；尚未执行的 error 占位结果可以为空字符串，不能当成实际尝试过该路径。控制器及资源是组配置声明值，不是截图目录别名。
 
-`groups[]` 保留按配置分组的原始结果；无文件来源的全量库调用也可用这些组汇总状态，不能因 `files` 为空就判为空运行。扩展需要文件身份，不能把无来源组强行挂到某个文件。
+每个实际平台用例结果只在 `files[].cases[].platforms[].result` 中出现一次，且必须带有效 origin，与所属文件和用例原始下标一致。
 
 ### 判定与验证是否完整
 
@@ -161,18 +162,18 @@ reason?: string
 | --- | --- |
 | 单平台用例 | 检查为 pass/fail，应返回却缺失节点结果也为 fail；缺图为 skipped；没有待检查节点或计划未能执行为 error |
 | 跨平台用例 | fail 优先，其次 error；有平台缺图则 skipped；其余为 pass |
-| 文件 | 无文件错误且本次 cases 为空时为 skipped/no-cases-selected；其余有用例失败为 fail，其次 error；有有效检查且其余仅缺图时可 pass，全缺图无验证仍为 error |
-| 整批 | error 优先于 failed，再是 passed；空选择文件不影响其他文件的真实结论，全部过滤为空仍为 empty/no-tests-matched |
+| 文件 | 有用例失败时为 fail，其次看文件 error 或用例 error；无文件错误且本次 cases 为空时为 skipped/no-cases-selected；有有效检查且其余仅缺图时可 pass，全缺图无验证仍为 error |
+| 整批 | error 优先于 failed，再是 passed；文件错误仍使整批 error，空选择文件不影响其他文件的真实结论，全部过滤为空才为 empty/no-tests-matched |
 
 **用例标灰不等于它在所有平台都没运行。** 例如 A 平台已有有效检查并通过、B 平台缺图，该用例汇总为 skipped，文件可为 pass，同时列明 B 未验证。即使每条用例汇总都是 skipped，也不能只看这个值就断言文件“全缺图”；应直接用框架给出的文件结论。
 
 预期命中和预期不命中的节点都必须返回识别结果。没有结果不能默认为未命中；识别无明细会报错。用例设置了期望框时，识别必须返回实际框，且实际框完整落在期望框内；未设置期望框的用例不做框检查。
 
-扩展检查顶层格式、合法状态、必要字段、文件身份、`selectedCases` 与用例结果的覆盖关系，并对照面板传入的所选下标。缺项或不支持的格式明确报错，不把没返回的用例补成通过。TypeScript 接口只是本地类型说明，读取边界上的值仍需校验。
+扩展检查顶层格式、合法状态、必要字段、文件身份、`selectedCases` 与用例结果的覆盖关系，并对照面板传入的所选下标。缺项或不支持的格式明确报错，不把没返回的用例补成通过。TypeScript 接口只是本地类型说明，读取边界上的值仍需校验。编辑辅助解析和对未知字段的检查不能代替来源结构、类型及文件身份校验。
 
 ### 耗时
 
-同组按规范化绝对截图路径复用识别任务。同图被多个所选用例使用时，真实任务耗时在这些用例间分摊，避免同图运行多次或重复累计。组时间等于组内用例时间之和；文件时间为对应所选用例各平台的时间之和。顶层 `durationMs` 是运行实际经过的时间，包含准备和等待，不与并行任务时间求和等同。
+同组按规范化绝对截图路径复用识别任务。同图被多个所选用例使用时，真实任务耗时在这些用例间分摊，避免同图运行多次或重复累计。内部组时间等于组内用例时间之和，不作为公开报告字段；文件时间为对应所选用例各平台的时间之和。顶层 `durationMs` 是运行实际经过的时间，包含准备和等待，不与并行任务时间求和等同。
 
 ### 中文失败信息
 
@@ -193,7 +194,7 @@ reason?: string
 
 框架在每张图的全部节点块完成后立即判定，同图复用用例分别比较自己的期望；来源的最后一个计划平台结束后才发用例结果。缺图、无节点及空选择文件可以直接完成，不伪造识别开始；空文件快照沿用 skipped/no-cases-selected 及严格范围校验。尚未形成计划的配置错误仅由最终结果说明。资源组和测试组仍按计划处理，组内识别任务并行，不改成逐文件进程。
 
-快照的 groups 同样限定在对应范围，并复用最终报告的汇总规则。用例快照按单文件、单原始下标校验；文件快照按该文件的 expectedCases 校验。记录还检查合法 `type`、必需结构、请求来源、原始下标和快照身份，未经校验的标准输出记录不能直接交给面板。
+文件/用例快照只含对应范围的 `files`，复用最终报告的汇总规则。用例快照按单文件、单原始下标校验；文件快照按该文件的 expectedCases 校验。记录还检查合法 `type`、必需结构、请求来源、原始下标、覆盖、汇总和快照身份，未经校验的标准输出记录不能直接交给面板。
 
 `RunProgress` 保存已开始和已完成事实，相同重复消息不再发布，包括完成后重复收到已记录的开始消息。重复结果矛盾、此前未报告开始却在完成后首次报告开始、文件结果遗漏已开始或已完成用例都报协议错误。平台返回顺序不影响比较，但来源、元数据、结论、检查和识别耗时必须一致。
 

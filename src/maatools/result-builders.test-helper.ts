@@ -65,15 +65,5 @@ export function fixtureResult(
         status: "passed",
         durationMs: 10,
         files: [metadata],
-        groups: [
-            {
-                name: "same name",
-                controller: "Desktop",
-                resource: "CN",
-                verdict: "pass",
-                durationMs: 6,
-                cases: cases.map((item) => item.platforms[0].result),
-            },
-        ],
     };
 }
